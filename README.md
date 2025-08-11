@@ -1,4 +1,9 @@
+# Mahjong AI Match v4.3.3
 
-# Mahjong AI Match (v3.3)
-- 新增：暂停/继续按钮；日志显示每次出牌理由
-- API 返回 { tile, reason }；本地启发式会生成中文理由；外部模型则标注来源
+- 观战/回放接口（本地内存简化版），以及**手牌/弃牌图标化**展示。
+
+## 开发
+```bash
+npm i
+npm run dev
+```
