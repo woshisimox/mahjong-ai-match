@@ -1,0 +1,16 @@
+
+body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#eef2ff;padding:20px}
+.btn{background:#1f2937;color:#fff;border:1px solid #374151;border-radius:12px;padding:6px 10px}
+.btn:disabled{opacity:.5}
+.card{background:#0f172a;border:1px solid #1f2a44;border-radius:14px;padding:16px;box-shadow:0 8px 20px rgba(2,6,23,.25)}
+input,select{background:#0b1224;color:#e5e7eb;border:1px solid #253257;border-radius:10px;padding:6px 8px}
+.grid{display:grid}
+.max-w{max-width:1000px;margin:0 auto}
+.small{font-size:.9em}
+.tiles{display:flex; flex-wrap:wrap; gap:6px}
+.tile{width:28px; height:38px; border-radius:6px; border:1px solid rgba(255,255,255,.15); background:#0b1224;
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; box-shadow:0 2px 8px rgba(2,6,23,.25)}
+.tile.w{color:#ef4444} .tile.b{color:#60a5fa} .tile.t{color:#22c55e} .tile.z{color:#eab308}
+.tile.small{width:22px; height:30px; font-size:12px; border-radius:5px}
+.tiles-wrap-14{max-width: 320px}
+@media (min-width:1024px){ .tiles-wrap-14{max-width:420px} }
