@@ -154,20 +154,27 @@ export default function Home(){
           </label>
         ))}
       </div>
+      <div className="grid" style={{gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:8, marginTop:10}}>
+        <label className="small">ChatGPT Key
+          <input className="w-full" placeholder="sk-..." value={keys.chatgpt||''} onChange={e=>setKeys({...keys, chatgpt:e.target.value})} />
+        </label>
+        <label className="small">Kimi (Moonshot) Key
+          <input className="w-full" placeholder="moonshot-..." value={keys.kimi||''} onChange={e=>setKeys({...keys, kimi:e.target.value})} />
+        </label>
+        <label className="small">Gemini Key
+          <input className="w-full" placeholder="AIza..." value={keys.gemini||''} onChange={e=>setKeys({...keys, gemini:e.target.value})} />
+        </label>
+        <label className="small">Grok (xAI) Key
+          <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
+        </label>
+      </div>
       <div className="text-xs" style={{opacity:.7, marginTop:6}}>同一种AI可以选择多个座位（Key 在“对战设置”里统一配置；若未配置将回退到本地策略）。</div>
-      <div className="text-xs" style={{opacity:.7, marginTop:6}}>API Key 已在“对战设置”中配置；此处不再显示。</div>
 </div>
 
         <button className="btn" onClick={startNewMatch}>开始新比赛</button>
         <button className="btn" onClick={startNextHand} disabled={!matchActive || handRunning || handNo>=maxHands}>开始新一轮</button>
         <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
       </div>
-    </div>
-
-    <div className="card">
-      <div className="font-semibold mb-2">AI Key 设置（仅本次会话内使用）</div>
-      <div className="text-xs" style={{opacity:.7, marginTop:6}}>API Key 已在“对战设置”中配置；此处不再显示。</div>
-<div className="text-xs" style={{opacity:.7, marginTop:6}}>未填写时，将使用本地启发式出牌（不会请求外部接口）。</div>
     </div>
 
     <div className="card">
