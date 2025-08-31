@@ -229,7 +229,7 @@ setPlayers([...ps]);
         const idxTile = ps[i].hand.indexOf(out);
         ps[i].hand.splice(idxTile,1);
         ps[i].discards.push(out);
-        appendLogs([`[API] ${ps[i].ai} ${decide?.meta?.usedApi? '使用' : '未使用'}（${decide?.meta?.provider||'local'}）`, `${ps[i].ai} 打出 ${tileLabel(out)}（理由：${reasonText}）`]);
+        appendLogs([`${ps[i].ai} 打出 ${tileLabel(out)} — ${decide?.meta?.usedApi ? 'API:' + (decide?.meta?.provider||'local') : '本地'}；${reasonText}`]);
         // 3) 询问反应并执行
         if(table){
           table.players = ps.map((p,idx)=>({ ...p, melds: (table.players[idx]?.melds||[]), isWinner: (table.players[idx]?.isWinner||false) }));
@@ -274,6 +274,7 @@ setPlayers([...ps]);
 
         psRef.current = ps; wallRef.current = w;
         setPlayers([...ps]);
+        setWall([...w]);
         await new Promise(r=>setTimeout(r, intervalMs));
       }
     }
@@ -304,6 +305,7 @@ setPlayers([...ps]);
           <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
           <button onClick={startNewMatch}>开始新比赛</button>
           <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
+          <span className="small" style={{marginLeft:8}}>余牌：{(table?.wall?.length ?? wall.length)}</span>
         </div>
 
         <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
