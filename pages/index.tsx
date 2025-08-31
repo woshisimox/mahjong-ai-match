@@ -77,7 +77,7 @@ export default function Home(){
     setHandRunning(false);
     setPaused(false);
     psRef.current = null; wallRef.current = null;
-    if(rRef) rRef.current = false;
+    runningRef.current = false;
     runningRef.current = false;
   }
 
@@ -281,7 +281,7 @@ setPlayers([...ps]);
     setHandRunning(false);
     setPaused(false);
     psRef.current = null; wallRef.current = null;
-    if(rRef) rRef.current = false;
+    runningRef.current = false;
     runningRef.current = false;
     setHandNo(x=>x+1);
   }
