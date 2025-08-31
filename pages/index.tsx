@@ -46,16 +46,13 @@ export default function Home(){
     appendLogs([`结算：${label(who)} 自摸（${wr.yaku.join('+')}，共${base}番）`,
       ...ps.map((p,i)=>`  ${label(i)}：${deltas[i]>0?'+':''}${deltas[i]}`)
     ]);
-    return ps.map((p,i)=>({...p, score: p.score + deltas[i]}));
-  }
+    return ps.map((p,i)=>({...p, score: p.score + deltas[i]}}
   function settlementRon(ps: PlayerState[], winner: number, loser: number, wr: {yaku:string[]; fan:number}){
     const base = wr.fan;
-    const deltas = ps.map((_,i)=> i===winner ? +base : (i===loser ? -base : 0));
-    appendLogs([`结算：${label(winner)} 荣和（${label(loser)} 放铳；${wr.yaku.join('+')}，共${base}番）`,
+    const deltas = ps.map((_,i)=> i===winner ? +base : (i===loser ? -base : 0appendLogs([`结算：${label(winner)} 荣和（${label(loser)} 放铳；${wr.yaku.join('+')}，共${base}番）`,
       ...ps.map((p,i)=>`  ${label(i)}：${deltas[i]>0?'+':''}${deltas[i]}`)
     ]);
-    return ps.map((p,i)=>({...p, score: p.score + deltas[i]}));
-  }
+    return ps.map((p,i)=>({...p, score: p.score + deltas[i]}}
 
   function buildSnapshot(curIdx:number){
     const self = players[curIdx] as (PlayerState | undefined);
@@ -69,8 +66,7 @@ export default function Home(){
   }
 
   async function playOneHand(psInit: PlayerState[], wallInit: string[]){
-    let ps = psInit.map(p=>({...p, hand: sortTiles(p.hand)}));
-    let w = wallInit;
+    let ps = psInit.map(p=>({...p, hand: sortTiles(p.hand)}let w = wallInit;
     // 预留4张作“岭上牌”（死墙替代，简化）
     let rinshan: string[] = []; // 欢乐场：不保留死墙
     let cur = 0; // 轮到谁
@@ -113,12 +109,10 @@ export default function Home(){
           const canRon = checkWin([...ps[j].hand, tile]);
           if(canRon){
             // 抢杠荣和
-            const wr = (rule==='sichuan_strict' ? scoreWinSichuanStrict([...ps[j].hand, tile], ps[j].melds, { robKong:true, tsumo:false, capFan: scCap }) : scoreWin([...ps[j].hand, tile], { robKong:true, tsumo:false }));
-            // 从碰面子升级失败（不加杠了），直接结算
+            const wr = (rule==='sichuan_strict' ? scoreWinSichuanStrict([...ps[j].hand, tile], ps[j].melds, { robKong:true, tsumo:false, capFan: scCap }) : scoreWin([...ps[j].hand, tile], { robKong:true, tsumo:false }// 从碰面子升级失败（不加杠了），直接结算
             appendLogs([`${label(j)} 抢杠和 ${tileLabel(tile)}（抢 ${label(cur)} 的加杠）`]);
             if(rule==='sichuan_strict'){
-          const _res = settlementRonStrict(ps, j, cur, wr, (typeof scCap==='number'?scCap:13), (typeof scBase==='number'?scBase:1));
-          appendLogs([`结算(严)：${label(j)} 荣和（${label(cur)} 放铳；${wr.yaku.join('+')}，${_res.fan}番，底=${(typeof scBase==='number'?scBase:1)} → 赔 ${_res.pay}）`]);
+          const _res = settlementRonStrict(ps, j, cur, wr, (typeof scCap==='number'?scCap:13), (typeof scBase==='number'?scBase:1appendLogs([`结算(严)：${label(j)} 荣和（${label(cur)} 放铳；${wr.yaku.join('+')}，${_res.fan}番，底=${(typeof scBase==='number'?scBase:1)} → 赔 ${_res.pay}）`]);
           ps = _res.ps;
         } else {
           ps = settlementRon(ps, j, cur, wr);
@@ -141,8 +135,7 @@ export default function Home(){
         setPlayers([...ps]);
         // 加杠后岭上摸
         afterKanDraw = true;
-        await new Promise(r=>setTimeout(r, intervalMs));
-        continue; // 进入下一轮（岭上摸）
+        await new Promise(r=>setTimeout(r, intervalMscontinue; // 进入下一轮（岭上摸）
       }
 
       // 2) 尝试“暗杠”（有4张同牌，在打牌前处理；每轮最多一次）
@@ -165,8 +158,7 @@ export default function Home(){
         }
         setPlayers([...ps]);
         afterKanDraw = true;
-        await new Promise(r=>setTimeout(r, intervalMs));
-        continue; // 岭上摸
+        await new Promise(r=>setTimeout(r, intervalMscontinue; // 岭上摸
       }
 
       // 自摸判定（岭上摸后自摸将包含岭上开花番）
@@ -180,8 +172,7 @@ export default function Home(){
         const wr = rSelf;
         appendLogs([`${label(cur)} 自摸：${wr.yaku.join('+')} = ${wr.fan}`]);
         if(rule==='sichuan_strict'){
-          const _res = settlementTsumoStrict(ps, cur, wr, (typeof scCap==='number'?scCap:13), (typeof scBase==='number'?scBase:1));
-          appendLogs([`结算(严)：${label(cur)} 自摸（${wr.yaku.join('+')}，${_res.fan}番，底=${(typeof scBase==='number'?scBase:1)} → 每家 ${_res.pay}）`,
+          const _res = settlementTsumoStrict(ps, cur, wr, (typeof scCap==='number'?scCap:13), (typeof scBase==='number'?scBase:1appendLogs([`结算(严)：${label(cur)} 自摸（${wr.yaku.join('+')}，${_res.fan}番，底=${(typeof scBase==='number'?scBase:1)} → 每家 ${_res.pay}）`,
             ..._res.ps.map((p,i)=>`  ${label(i)}：${(i===cur?'+':'')}${(i===cur?_res.gain:(i===cur?0:-_res.pay))}`)
           ]);
           ps = _res.ps;
@@ -199,8 +190,7 @@ export default function Home(){
         const resp = await fetch(`/api/aiPlay?ai=${ps[cur].ai}`, {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ hand: ps[cur].hand, keys, snapshot: buildSnapshot(cur) })
-        }).then(r=>r.json());
-        if(resp?.tile && ps[cur].hand.includes(resp.tile)){ out=resp.tile; reasonText = resp?.reason || reasonText; }
+        }).then(r=>r.json(if(resp?.tile && ps[cur].hand.includes(resp.tile)){ out=resp.tile; reasonText = resp?.reason || reasonText; }
         apiMeta = resp?.meta || null;
       }catch{}
       if(!out){ out=ps[cur].hand[0]; reasonText='fallback'; }
@@ -213,17 +203,13 @@ export default function Home(){
       const discardLine = `${label(cur)} 打出 ${tileLabel(out)}（理由：${reasonText}）`;
       appendLogs([apiLine, discardLine]);
       setPlayers([...ps]);
-      await new Promise(r=>setTimeout(r, intervalMs));
-
-      
-      // 荣和优先（欢乐场：一炮多响）
+      await new Promise(r=>setTimeout(r, intervalMs// 荣和优先（欢乐场：一炮多响）
       {
         const winners: { j:number; wr:any }[] = [];
         for(let k=1;k<ps.length;k++){
           const j=(cur+k)%ps.length;
           if(((rule!=='sichuan' && rule!=='sichuan_strict') || !(ps[j].que && ps[j].hand.some(x=>x[1]===ps[j].que))) && checkWin([...ps[j].hand, out as string])){
-            const wr = (rule==='sichuan_strict' ? scoreWinSichuanStrict([...ps[j].hand, out as string], ps[j].melds, { tsumo:false, capFan: scCap }) : scoreWin([...ps[j].hand, out as string], { tsumo:false }));
-            winners.push({ j, wr });
+            const wr = (rule==='sichuan_strict' ? scoreWinSichuanStrict([...ps[j].hand, out as string], ps[j].melds, { tsumo:false, capFan: scCap }) : scoreWin([...ps[j].hand, out as string], { tsumo:false }winners.push({ j, wr });
           }
         }
         if(winners.length>0){
@@ -234,8 +220,7 @@ export default function Home(){
           for(const wnr of winners){
             appendLogs([`${label(wnr.j)} 荣和 ${tileLabel(out!)}（${label(cur)} 放铳）`]);
             if(rule==='sichuan_strict'){
-              const _res = settlementRonStrict(ps, wnr.j, cur, wnr.wr, (typeof scCap==='number'?scCap:13), (typeof scBase==='number'?scBase:1));
-              appendLogs([`结算(严)：${label(wnr.j)} 荣和（${label(cur)} 放铳；${wnr.wr.yaku.join('+')}，${_res.fan}番，底=${(typeof scBase==='number'?scBase:1)} → 赔 ${_res.pay}）`]);
+              const _res = settlementRonStrict(ps, wnr.j, cur, wnr.wr, (typeof scCap==='number'?scCap:13), (typeof scBase==='number'?scBase:1appendLogs([`结算(严)：${label(wnr.j)} 荣和（${label(cur)} 放铳；${wnr.wr.yaku.join('+')}，${_res.fan}番，底=${(typeof scBase==='number'?scBase:1)} → 赔 ${_res.pay}）`]);
               ps = _res.ps;
             } else {
               ps = settlementRon(ps, wnr.j, cur, wnr.wr);
@@ -274,8 +259,7 @@ export default function Home(){
             // 明杠后由 j 岭上摸
             cur = j;
             afterKanDraw = true;
-            await new Promise(r=>setTimeout(r, intervalMs));
-            claimed = true;
+            await new Promise(r=>setTimeout(r, intervalMsclaimed = true;
             break;
           }
         }
@@ -346,10 +330,9 @@ export default function Home(){
     for(let h=0; h<maxHands; h++){
       setHandRunning(true);
       let wall = generateWallEx({ includeFlowers: useFlowers && rule!=='sichuan' && rule!=='sichuan_strict', sichuan: (rule==='sichuan'||rule==='sichuan_strict') });
-      ps = dealHands(wall, ps.map(p=>p.ai)); // 重新发牌，沿用AI标识
+      ps = dealHands(wall, ps.map(p=>p.ai// 重新发牌，沿用AI标识
       // 初始化花/定缺/存活
-      ps = ps.map(p=>({ ...p, flowers: [], alive: true }));
-      if(rule==='sichuan' || rule==='sichuan_strict'){
+      ps = ps.map(p=>({ ...p, flowers: [], alive: true }if(rule==='sichuan' || rule==='sichuan_strict'){
         ps = ps.map(p=>{ const cnt:any={W:0,B:0,T:0}; for(const t of p.hand){ const s=t[1]; if(s==='W'||s==='B'||s==='T') cnt[s]++; }
           const que=(['W','B','T'] as const).reduce((a,b)=> cnt[a]<=cnt[b]?a:b);
           return { ...p, que };
@@ -360,8 +343,7 @@ export default function Home(){
       await playOneHand(ps, wall);
       setHandRunning(false);
       setHandNo(h+1);
-      await new Promise(r=>setTimeout(r, 400));
-    }
+      await new Promise(r=>setTimeout(r, 400}
     setMatchActive(false);
   }
 
@@ -526,11 +508,10 @@ export default function Home(){
 
   </div>);
 }
-function settlementTsumoStrict(ps: PlayerState[], who: number, wr: {yaku:string[]; fan:number}, cap:number, base:number){
+function settlementTsumoStrict(ps: PlayerState[], who: number, wr: {yaku:string[]; fan:number, base:number){
   const fan = Math.min(wr.fan, cap);
   const pay = base * Math.pow(2, fan);
-  const next = ps.map(p=>({...p}));
-  let gain = 0;
+  const next = ps.map(p=>({...p}let gain = 0;
   for(let i=0;i<next.length;i++){
     if(i===who) continue;
     if(next[i].alive===false) continue;
@@ -539,11 +520,10 @@ function settlementTsumoStrict(ps: PlayerState[], who: number, wr: {yaku:string[
   }
   next[who].score += gain;
   return { ps: next, fan, pay, gain };
-}, cap:number, base:number){
+, base:number){
   const fan = Math.min(wr.fan, cap);
   const pay = base * Math.pow(2, fan);
-  const next = ps.map(p=>({...p}));
-  let gain = 0;
+  const next = ps.map(p=>({...p}let gain = 0;
   for(let i=0;i<next.length;i++){
     if(i===who) continue;
     if(next[i].alive===false) continue;
@@ -553,23 +533,16 @@ function settlementTsumoStrict(ps: PlayerState[], who: number, wr: {yaku:string[
   next[who].score += gain;
   return { ps: next, fan, pay, gain };
 }
-function settlementRonStrict(ps: PlayerState[], winner: number, loser: number, wr: {yaku:string[]; fan:number}, cap:number, base:number){
+function settlementRonStrict(ps: PlayerState[], winner: number, loser: number, wr: {yaku:string[]; fan:number, base:number){
   const fan = Math.min(wr.fan, cap);
   const pay = base * Math.pow(2, fan);
-  const next = ps.map(p=>({...p}));
-  next[winner].score += pay;
+  const next = ps.map(p=>({...p}next[winner].score += pay;
   if(next[loser].alive!==false) next[loser].score -= pay;
   return { ps: next, fan, pay };
-}, cap:number, base:number){
+, base:number){
   const fan = Math.min(wr.fan, cap);
   const pay = base * Math.pow(2, fan);
-  const next = ps.map(p=>({...p}));
-  next[winner].score += pay;
+  const next = ps.map(p=>({...p}next[winner].score += pay;
   if(next[loser].alive!==false) next[loser].score -= pay;
   return { ps: next, fan, pay };
-}));
-  next[winner].score += pay;
-  if(next[loser].alive!==false) next[loser].score -= pay;
-  appendLogs([`结算(严)：${label(winner)} 荣和（${label(loser)} 放铳；${wr.yaku.join('+')}，${fan}番，底=${scBase} → 赔 ${pay}）`]);
-  return next;
 }
