@@ -43,7 +43,7 @@ export default function Home(){
 
  function startNewMatch() {
   setLog([]); // ✅ 清空旧日志
-  const w = generateWall();
+  const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
   const ps = dealHands(w, ['kimi','kimi2','gemini','grok']);
   setPlayers(ps);
   setWall(w);
@@ -57,7 +57,7 @@ export default function Home(){
     if(!matchActive){ alert('请先开始新比赛'); return; }
     if(handRunning){ alert('当前一轮仍在进行中'); return; }
     if(handNo>=maxHands){ alert('本场比赛轮次已满，请新开一场比赛'); return; }
-    const w = generateWall();
+    const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
     const ps = players.map(p => ({ ...p, hand: w.splice(0,13), discards: [] }));
     setPlayers(ps); setWall(w);
     appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮开始 ——`]);
