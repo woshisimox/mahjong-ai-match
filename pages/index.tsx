@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState,
   type RuleMode, getReactionsAfterDiscard, priorityResolve, applyMeldAction, onDrawPhase,
@@ -22,6 +22,7 @@ export default function Home(){
   const [intervalMs, setIntervalMs] = useState(300);
   const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
   const [showHands, setShowHands] = useState(true);
+  const runningRef = useRef(false);
   type Keys = { kimi?: string; kimi2?: string; gemini?: string; grok?: string };
   const [keys, setKeys] = useState<Keys>({});
 
@@ -71,6 +72,8 @@ export default function Home(){
     setHandNo(0);
     setMatchActive(true);
     setHandRunning(false);
+    if(rRef) rRef.current = false;
+    runningRef.current = false;
   }
 
   function startNextHand(){
@@ -83,7 +86,8 @@ export default function Home(){
     setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
     appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮开始 ——`]);
     setHandRunning(true);
-    void playOneHand(ps, w);
+    runningRef.current = true;
+    void playOneHand(ps, w, runningRef);
   }
 
 
@@ -103,9 +107,9 @@ export default function Home(){
     return { tile: hand[0], reason: 'fallback (no api)', meta:{ usedApi:false, provider:'local' } };
   }
     
-  async function playOneHand(ps:PlayerState[], w:string[]){
+  async function playOneHand(ps:PlayerState[], w:string[], rRef: React.RefObject<boolean>){
     for(let turn=0; turn<2000; turn++){
-      if(!handRunning) break;
+      if(!rRef?.current){ appendLogs(['回合未开始或已停止']); return; }
       if(w.length===0){ appendLogs(['牌墙打空，流局']); break; }
       for(let i=0;i<ps.length;i++){
         // 跳过已胡
@@ -244,6 +248,8 @@ setPlayers([...ps]);
     }
     appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮结束 ——`]);
     setHandRunning(false);
+    if(rRef) rRef.current = false;
+    runningRef.current = false;
     setHandNo(x=>x+1);
   }
 
