@@ -198,20 +198,42 @@ const local=()=>{
 }
 
   // human-readable reason
-
-  function reasonFor(x:string){
-    const c = counts[x]||0;
-    const s = suit(x), n = num(x);
-    const seenCnt = seen[x]||0;
-    const nbh = neighborCount(x);
-    if(c===1 && (!isNum(x) || nbh===0)) return `孤张${x}，无连接`;
-    if(isNum(x) && (n===1||n===9) && nbh===0) return `幺九孤张，难以成顺`;
-    if(c===1 && nbh===1) return `仅一侧相邻，连张弱`;
-    if(seenCnt>=3) return `多数已出现（${seenCnt}张），完成机会低`;
-    return `整体价值较低（连接度${nbh}，已见${seenCnt}）`;
+function reasonForLocal(x:string, hand:string[], snapshot:any){
+  // Recompute context locally to avoid scope issues
+  const counts:Record<string,number>={}; for(const t of hand) counts[t]=(counts[t]||0)+1;
+  const seen:Record<string,number>={};
+  for(const t of hand) seen[t]=(seen[t]||0)+1;
+  const players = Array.isArray(snapshot?.players)? snapshot.players: [];
+  for(const p of players){
+    const ds = Array.isArray(p?.discards)? p.discards: []; for(const d of ds){ seen[d]=(seen[d]||0)+1; }
+    const melds = Array.isArray(p?.melds)? p.melds: []; for(const m of melds){ const ts = Array.isArray(m?.tiles)? m.tiles: []; for(const d of ts){ seen[d]=(seen[d]||0)+1; } }
   }
+  const tableDis = Array.isArray(snapshot?.discards)? snapshot.discards: [];
+  for(const d of tableDis){ seen[d]=(seen[d]||0)+1; }
 
-  return { tile: drop, reason: reasonFor(drop)+`；shanten=${bestSh}，uke=${bestUke}` , meta:{ usedApi:false, provider:'local', detail:'shanten+ukeire'} };
+  const suit = (t:string)=>t[1];
+  const num  = (t:string)=>parseInt(t[0],10)||0;
+  const isNum = (t:string)=>['W','B','T'].includes(suit(t));
+  const has = (t:string)=> (counts[t]||0)>0;
+  const neighborCount = (t:string)=>{
+    if(!isNum(t)) return 0;
+    const s=suit(t), n=num(t);
+    let c=0;
+    if(has(`${n-2}${s}`)) c++; if(has(`${n-1}${s}`)) c++; if(has(`${n+1}${s}`)) c++; if(has(`${n+2}${s}`)) c++;
+    return c;
+  };
+
+  const c = counts[x]||0;
+  const s = suit(x), n = num(x);
+  const seenCnt = seen[x]||0;
+  const nbh = neighborCount(x);
+  if(c===1 && (!isNum(x) || nbh===0)) return `孤张${x}，无连接`;
+  if(isNum(x) && (n===1||n===9) && nbh===0) return `幺九孤张，难以成顺`;
+  if(c===1 && nbh===1) return `仅一侧相邻，连张弱`;
+  if(seenCnt>=3) return `多数已出现（${seenCnt}张），完成机会低`;
+  return `整体价值较低（连接度${nbh}，已见${seenCnt}）`;
+}
+  return { tile: drop, reason: reasonForLocal(drop, hand, snapshot)+`；shanten=${bestSh}，uke=${bestUke}` , meta:{ usedApi:false, provider:'local', detail:'shanten+ukeire'} };
 };
 
 
