@@ -1,360 +1,93 @@
+// @ts-nocheck
+import React, { useEffect, useRef, useState } from 'react';
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState,
-  type RuleMode, getReactionsAfterDiscard, priorityResolve, applyMeldAction, onDrawPhase,
-  discardTile, markWinner, applyConcealedGangAction, applyAddGangAction
-} from '@/lib/mahjongEngine';
+type RuleMode = 'SCZDXZ' | 'BASIC';
+type MeldType = 'CHI' | 'PENG' | 'GANG' | 'ANGANG' | 'BUGANG';
+type Meld = { type: MeldType; tiles: string[]; };
+type PlayerState = { ai: string; hand: string[]; discards: string[]; melds: Meld[]; isWinner: boolean; score: number };
 
-export default function Home(){
-  function tileClass(t:string){ const s=t[1]; if(s==='W') return 'tile w'; if(s==='B') return 'tile b'; if(s==='T') return 'tile t'; return 'tile z'; }
-  function tileLabel(t:string){ const n=t[0]; const s=t[1]; const mark = s==='W'?'万':(s==='B'?'饼':(s==='T'?'条':'字')); return `${n}${mark}`; }
-  const Tile = ({t, small=false}:{t:string; small?:boolean})=>(<span className={tileClass(t)+(small?' small':'')} title={t}>{tileLabel(t)}</span>);
-
-  const [players, setPlayers] = useState<PlayerState[]>([]);
-  const [table, setTable] = useState<any|null>(null);
+export default function Home() {
+  // ----------- 基础状态 -----------
+  const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ'); // 四川 108
+  const [players, setPlayers] = useState<PlayerState[]>([
+    { ai: '东', hand: [], discards: [], melds: [], isWinner: false, score: 1000 },
+    { ai: '南', hand: [], discards: [], melds: [], isWinner: false, score: 1000 },
+    { ai: '西', hand: [], discards: [], melds: [], isWinner: false, score: 1000 },
+    { ai: '北', hand: [], discards: [], melds: [], isWinner: false, score: 1000 },
+  ]);
   const [wall, setWall] = useState<string[]>([]);
-  const [log, setLog] = useState<string[]>([]);
-  const [maxHands, setMaxHands] = useState(8);
-  const [handNo, setHandNo] = useState(0);
-  const [matchActive, setMatchActive] = useState(false);
-  const [handRunning, setHandRunning] = useState(false);
-  const [intervalMs, setIntervalMs] = useState(300);
-  const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
+  const [table, setTable] = useState<any | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const appendLogs = (items: string[]) => setLogs(prev => [...prev, ...items]);
+
+  const [maxHands, setMaxHands] = useState(1);
+  const [intervalMs, setIntervalMs] = useState(200);
   const [showHands, setShowHands] = useState(true);
   const [startScore, setStartScore] = useState(1000);
-  const [seatProvider, setSeatProvider] = useState<{E:string;S:string;W:string;N:string}>({E:'local',S:'local',W:'local',N:'local'});
+
+  const [matchActive, setMatchActive] = useState(false);
+  const [handRunning, setHandRunning] = useState(false);
   const [paused, setPaused] = useState(false);
+
+  // provider per seat
+  const [seatProvider, setSeatProvider] = useState<{E:string;S:string;W:string;N:string}>({E:'local',S:'local',W:'local',N:'local'});
+  // API keys
+  const [keys, setKeys] = useState<{kimi2?:string; kimi?:string; gemini?:string; grok?:string}>({});
+
+  // 运行引用（避免读取到过期state）
+  const runningRef = useRef(false);
   const psRef = useRef<PlayerState[]|null>(null);
   const wallRef = useRef<string[]|null>(null);
-  const runningRef = useRef(false);
-  type Keys = { kimi?: string; kimi2?: string; gemini?: string; grok?: string };
-  const [keys, setKeys] = useState<Keys>({});
 
-  // load/save keys in sessionStorage
-  useEffect(()=>{
-    try{
-      const s = sessionStorage.getItem('mahjong_api_keys');
-      if(s){ setKeys(JSON.parse(s)); }
-    }catch{}
+  useEffect(() => {
+    // 恢复 keys
+    const raw = sessionStorage.getItem('mahjong_keys');
+    if (raw) try { setKeys(JSON.parse(raw)); } catch {}
   }, []);
-  useEffect(()=>{
-    try{ sessionStorage.setItem('mahjong_api_keys', JSON.stringify(keys||{})); }catch{}
+  useEffect(() => {
+    sessionStorage.setItem('mahjong_keys', JSON.stringify(keys||{}));
   }, [keys]);
-    
 
-  function appendLogs(lines:string[]){ setLog(prev => { const next=[...prev]; for(const ln of lines){ next.push(ln); } return next; }); }
-
-
-  // ===== 完全体 Shanten + Uke-ire =====
-  const ALL_SUITS = ['W','B','T'] as const;
-  function allTileKeys(includeHonors:boolean){
-    const arr:string[] = [];
-    for(const s of ALL_SUITS){ for(let n=1;n<=9;n++) arr.push(`${n}${s}`); }
-    if(includeHonors){ for(let n=1;n<=7;n++) arr.push(`${n}Z`); }
-    return arr;
-  }
-  function toSuitCounts(hand:string[]){
-    const m:Record<string, number[]> = { W:Array(10).fill(0), B:Array(10).fill(0), T:Array(10).fill(0) };
-    const honors = Array(8).fill(0); // 1..7Z
-    for(const t of hand){
-      const s=t[1]; const n=parseInt(t[0],10)||0;
-      if(s==='W'||s==='B'||s==='T'){ m[s][n]++; } else if(s==='Z'){ honors[n]++; }
-    }
-    return { suits:m, honors };
-  }
-  function cloneArr(a:number[]){ return a.slice(); }
-  function evalSuitFull(cnt:number[]){
-    // 深度搜索该门花色的最好 (mentsu, taatsu)
-    const memo = new Map<string,[number,number]>();
-    function dfs(a:number[], i=1):[number,number]{
-      while(i<=9 && a[i]===0) i++;
-      if(i>9) return [0,0];
-      const key = i+':'+a.join(',');
-      if(memo.has(key)) return memo.get(key)!;
-      let best:[number,number]=[0,0];
-      // 1) 跳过一张（用于后续与相邻组成搭子）
-      {
-        const b = cloneArr(a); b[i]--;
-        const [m,t] = dfs(b, i);
-        best = maxPair(best, [m, t]);
-      }
-      // 2) 刻子
-      if(a[i]>=3){
-        const b = cloneArr(a); b[i]-=3;
-        const [m,t] = dfs(b, i);
-        best = maxPair(best, [m+1, t]);
-      }
-      // 3) 顺子
-      if(i<=7 && a[i+1]>0 && a[i+2]>0 && a[i]>0){
-        const b = cloneArr(a); b[i]--; b[i+1]--; b[i+2]--;
-        const [m,t] = dfs(b, i);
-        best = maxPair(best, [m+1, t]);
-      }
-      // 4) 对子作为搭子
-      if(a[i]>=2){
-        const b = cloneArr(a); b[i]-=2;
-        const [m,t] = dfs(b, i);
-        best = maxPair(best, [m, t+1]);
-      }
-      // 5) 两面搭子 i,i+1
-      if(i<=8 && a[i]>0 && a[i+1]>0){
-        const b = cloneArr(a); b[i]--; b[i+1]--;
-        const [m,t] = dfs(b, i);
-        best = maxPair(best, [m, t+1]);
-      }
-      // 6) 岔张搭子 i,i+2
-      if(i<=7 && a[i]>0 && a[i+2]>0){
-        const b = cloneArr(a); b[i]--; b[i+2]--;
-        const [m,t] = dfs(b, i);
-        best = maxPair(best, [m, t+1]);
-      }
-      memo.set(key, best);
-      return best;
-    }
-    function maxPair(a:[number,number], b:[number,number]){
-      if(b[0]>a[0]) return b;
-      if(b[0]===a[0] && b[1]>a[1]) return b;
-      return a;
-    }
-    return dfs(cnt.slice());
-  }
-  function honorsEval(honors:number[]){
-    // honors only triplets & pairs
-    let m=0,t=0,pairs=0;
-    for(let n=1;n<=7;n++){
-      const c = honors[n];
-      if(c>=3){ m += Math.floor(c/3); }
-      if(c%3===2){ t += 1; pairs += Math.floor(c/2); }
-      else if(c%3===1){ /* single no taatsu */ }
-    }
-    return { m, t, pairs };
-  }
-  function normalHandShantenFull(hand:string[], meldsCount:number){
-    const { suits, honors } = toSuitCounts(hand);
-    let totalM = 0, totalT = 0;
-    // 数牌三门
-    for(const s of ALL_SUITS){
-      const [m,t] = evalSuitFull(suits[s]);
-      totalM += m; totalT += t;
-    }
-    // 字牌
-    const he = honorsEval(honors);
-    totalM += he.m; totalT += he.t;
-    // 限制搭子数：不能超过 (4 - (鸣面子 + 门清面子))
-    const mentsu = Math.min(4, totalM + meldsCount);
-    const maxTaatsu = Math.max(0, 4 - mentsu);
-    const taatsu = Math.min(totalT, maxTaatsu);
-    // 判断是否有对子充当将：若无，则 shanten +1
-    const hasPair = (he.pairs > 0) || hasAnyPair(suits);
-    let sh = 8 - (2*mentsu + taatsu) - (hasPair?1:0);
-    return Math.max(-1, sh);
-  }
-  function hasAnyPair(suits:Record<string,number[]>){
-    for(const s of ALL_SUITS){ for(let n=1;n<=9;n++){ if(suits[s][n]>=2) return true; } }
-    return false;
-  }
-  function sevenPairsShanten(hand:string[], includeHonors:boolean){
-    // 7对向听：需要7个对子，不能有刻子（刻子算1对，其余2张浪费）
-    const cnt:Record<string,number> = {};
-    for(const t of hand){ cnt[t]=(cnt[t]||0)+1; }
-    let pairs=0, extras=0, kinds=0;
-    for(const key of Object.keys(cnt)){
-      kinds++;
-      pairs += Math.floor(cnt[key]/2);
-      if(cnt[key]>=3) extras++; // 刻子多出来一张
-    }
-    let sh = 6 - pairs + Math.max(0, 7 - kinds);
-    return Math.max(-1, sh);
-  }
-  function bestShanten(hand:string[], meldsCount:number, includeHonors:boolean){
-    const a = normalHandShantenFull(hand, meldsCount);
-    const b = sevenPairsShanten(hand, includeHonors);
-    return Math.min(a,b);
-  }
-  function seenMapFromSnapshot(snapshot:any, selfHand:string[]){
-    const seen:Record<string,number>={};
-    const add=(t:string)=>{ seen[t]=(seen[t]||0)+1; };
-    for(const t of selfHand) add(t);
-    const players = Array.isArray(snapshot?.players)? snapshot.players: [];
-    for(const p of players){
-      const ds = Array.isArray(p?.discards)? p.discards: [];
-      for(const d of ds) add(d);
-      const melds = Array.isArray(p?.melds)? p.melds: [];
-      for(const m of melds){
-        const tiles = Array.isArray(m?.tiles)? m.tiles: [];
-        for(const d of tiles) add(d);
-      }
-    }
-    const tableDis = Array.isArray(snapshot?.discards)? snapshot.discards: [];
-    for(const d of tableDis) add(d);
-    return seen;
-  }
-  function ukeire(hand:string[], snapshot:any, includeHonors:boolean){
-    const meldsCount = Array.isArray(snapshot?.players) ? (snapshot.players.find((x:any)=>x?.hand===hand)?.melds?.length || 0) : 0;
-    const sh0 = bestShanten(hand, meldsCount, includeHonors);
-    const keys = allTileKeys(includeHonors);
-    const seen = seenMapFromSnapshot(snapshot||{}, hand);
-    let total=0; const detail:Record<string,number>={};
-    for(const k of keys){
-      const remain = Math.max(0, 4 - (seen[k]||0));
-      if(remain<=0) continue;
-      const h2 = hand.slice(); h2.push(k);
-      const sh1 = bestShanten(h2, meldsCount, includeHonors);
-      if(sh1 < sh0){
-        total += remain; detail[k]=remain;
-      }
-    }
-    return { total, detail, sh0 };
-  }
-
-  function sortTiles(arr:string[]){
-    const order=(t:string)=>{
-      const suitRank = t[1]==='W'?0:(t[1]==='B'?1:(t[1]==='T'?2:3));
-      return suitRank*100 + (parseInt(t[0],10)||0);
-    };
-    return [...arr].sort((a,b)=>order(a)-order(b));
-  }
-
-  // 计算可以吃的三张序列（包含目标牌）
-
-  // ---- 简易 Shanten 估算：支持 4面子+1将，考虑已鸣牌数 ----
-  function shantenApprox_OBSOLETE(hand:string[], meldsCount:number){
-    // 拷贝手，按花色统计
-    const bySuit:Record<string, number[]> = { W:Array(10).fill(0), B:Array(10).fill(0), T:Array(10).fill(0) };
-    const honors:Record<string, number> = {}; // 四川无字牌时为空
-    for(const t of hand){
-      const s=t[1]; const n=parseInt(t[0],10);
-      if(s==='W'||s==='B'||s==='T'){ bySuit[s][n]++; }
-      else { honors[t]=(honors[t]||0)+1; }
-    }
-    // 先贪心吃顺（每门按 1-7）
-    let mentsuInHand = 0;
-    const suitClone=(arr:number[])=>arr.slice();
-    function eatSeq(arr:number[]){
-      let made=0;
-      for(let n=1;n<=7;n++){
-        while(arr[n]>0 && arr[n+1]>0 && arr[n+2]>0){
-          arr[n]--;arr[n+1]--;arr[n+2]--; made++;
-        }
-      }
-      return made;
-    }
-    function takePungs(arr:number[]){
-      let made=0;
-      for(let n=1;n<=9;n++){
-        while(arr[n]>=3){ arr[n]-=3; made++; }
-      }
-      return made;
-    }
-    let tmp;
-    // 尝试两种顺序：先顺后刻、先刻后顺，取最大
-    let bestM=0;
-    for(const order of [0,1]){
-      const W=suitClone(bySuit.W), B=suitClone(bySuit.B), T=suitClone(bySuit.T);
-      let m=0;
-      if(order===0){
-        m+=eatSeq(W)+eatSeq(B)+eatSeq(T);
-        m+=takePungs(W)+takePungs(B)+takePungs(T);
-      }else{
-        m+=takePungs(W)+takePungs(B)+takePungs(T);
-        m+=eatSeq(W)+eatSeq(B)+eatSeq(T);
-      }
-      bestM=Math.max(bestM,m);
-    }
-    mentsuInHand = bestM;
-
-    // 计算将（对子）
-    let pairs=0;
-    for(const s of ['W','B','T']){
-      for(let n=1;n<=9;n++){
-        const cnt = bySuit[s][n];
-        if(cnt>=2) pairs += Math.floor(cnt/2);
-      }
-    }
-    for(const k in honors){ if(honors[k]>=2) pairs += Math.floor(honors[k]/2); }
-
-    // 已鸣的面子数
-    const mentsuTotal = mentsuInHand + (meldsCount||0);
-    const pairFlag = pairs>0 ? 1 : 0;
-    // 目标：4面子+1将 → 8 - (2*面子 + 将)
-    const sh = 8 - (2*mentsuTotal + pairFlag);
-    return Math.max(-1, sh); // -1 即听牌
-  }
-
-  function handAfterRemove(orig:string[], tiles:string[]){
-    const h = [...orig];
-    for(const t of tiles){
-      const idx = h.indexOf(t);
-      if(idx>=0) h.splice(idx,1);
-    }
-    return h;
-  }
-
-  function possibleChiSeqs(hand:string[], taken:string){
-    const s = taken[1]; const n = parseInt(taken[0],10);
-    const has=(x:string)=>hand.includes(x);
-    const seqs:string[][]=[];
-    if(s==='W'||s==='B'||s==='T'){
-      if(n>=3 && has(`${n-2}${s}`) && has(`${n-1}${s}`)) seqs.push([`${n-2}${s}`,`${n-1}${s}`,taken]);
-      if(n>=2 && n<=8 && has(`${n-1}${s}`) && has(`${n+1}${s}`)) seqs.push([`${n-1}${s}`,taken,`${n+1}${s}`]);
-      if(n<=7 && has(`${n+1}${s}`) && has(`${n+2}${s}`)) seqs.push([taken,`${n+1}${s}`,`${n+2}${s}`]);
-    }
-    return seqs;
-  }
-
+  // ----------- UI 触发 -----------
   function startNewMatch() {
-    setLog([]);
-    const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
-    const ps = dealHands(w, ['东','南','西','北']);
-    // 统一起始分
-    for(const p of ps){ (p as any).score = startScore; }
+    appendLogs(['🟢 新比赛']);
+    const ps = ['东','南','西','北'].map(seat => ({
+      ai: seat, hand: [], discards: [], melds: [], isWinner: false, score: startScore
+    })) as PlayerState[];
     setPlayers(ps);
-    setWall(w);
-    setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p, melds: [], isWinner:false })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
-    appendLogs(['新比赛开始（轮次清零，分数重置）']);
-    setHandNo(0);
+    setWall([]);
+    setTable(null);
     setMatchActive(true);
     setHandRunning(false);
     setPaused(false);
+    runningRef.current = false;
     psRef.current = null; wallRef.current = null;
-    runningRef.current = false;
-    runningRef.current = false;
   }
 
-  function startNextHand(){
-    if(!matchActive){ alert('请先开始新比赛'); return; }
-    if(handRunning){ alert('当前一轮仍在进行中'); return; }
-    if(handNo>=maxHands){ alert('本场比赛轮次已满，请新开一场比赛'); return; }
-    const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
+  async function startNextHand() {
+    if (!matchActive) return;
+    appendLogs(['🟡 开始新一轮']);
+
+    const w = generateWall(ruleMode);
+    shuffle(w);
+
     const ps = players.map(p => ({ ...p, hand: w.splice(0,13), discards: [], melds: [], isWinner:false }));
-    setPlayers(ps); setWall(w);
-    setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
-    psRef.current = ps; wallRef.current = w; setPaused(false);
-    appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮开始 ——`]);
+    setPlayers(ps);
+    setWall([...w]);
+    const tb = {
+      wall: [...w], discards: [], players: ps.map(p=>({ ...p })), turn: 0, dealer: 0,
+      lastDiscard: null, roundActive: true, winners: [], rule: ruleMode
+    };
+    setTable(tb);
+
+    psRef.current = ps; wallRef.current = w;
+    setPaused(false);
     setHandRunning(true);
     runningRef.current = true;
+
     void playOneHand(ps, w, runningRef);
   }
 
-
-  async function askAI(provider:string, hand:string[], snapshot:any){
-    try{
-      const resp = await fetch(`/api/aiPlay?provider=${encodeURIComponent(provider)}`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ hand, keys, snapshot })
-      });
-      const data = await resp.json();
-      if(data && typeof data.tile==='string' && hand.includes(data.tile)){
-        return data;
-      }
-    }catch(e){}
-    // fallback: drop first
-    return { tile: hand[0], reason: 'fallback (no api)', meta:{ usedApi:false, provider:'local' } };
-  }
-    
-  
   function togglePause(){
     if(!handRunning) return;
     if(!paused){
@@ -378,195 +111,471 @@ export default function Home(){
     appendLogs(['⏹️ 已停止当前轮次']);
   }
 
-  async function playOneHand(ps:PlayerState[], w:string[], rRef: React.RefObject<boolean>){
-    for(let turn=0; turn<2000; turn++){
-      if(!rRef?.current){ appendLogs(['回合未开始或已停止']); return; }
-      if(w.length===0){ appendLogs(['牌墙打空，流局']); break; }
-      for(let i=0;i<ps.length;i++){
-        // 跳过已胡
-        // @ts-ignore
-        if(table?.players?.[i]?.isWinner) continue;
+  // ----------- 主要算法：完全体 shanten + uke-ire -----------
+  const ALL_SUITS = ['W','B','T'] as const;
+  function allTileKeys(includeHonors:boolean){
+    const arr:string[] = [];
+    for(const s of ALL_SUITS){ for(let n=1;n<=9;n++) arr.push(`${n}${s}`); }
+    if(includeHonors){ for(let n=1;n<=7;n++) arr.push(`${n}Z`); }
+    return arr;
+  }
+  function toSuitCounts(hand:string[]){
+    const m:Record<string, number[]> = { W:Array(10).fill(0), B:Array(10).fill(0), T:Array(10).fill(0) };
+    const honors = Array(8).fill(0);
+    for(const t of hand){
+      const s=t[1]; const n=+t[0]||0;
+      if(s==='W'||s==='B'||s==='T') m[s][n]++; else if(s==='Z') honors[n]++;
+    }
+    return { suits:m, honors };
+  }
+  function cloneArr(a:number[]){ return a.slice(); }
+  function evalSuitFull(cnt:number[]){
+    const memo = new Map<string,[number,number]>();
+    function maxp(a:[number,number], b:[number,number]){ if(b[0]>a[0]) return b; if(b[0]===a[0] && b[1]>a[1]) return b; return a; }
+    function dfs(a:number[], i=1):[number,number]{
+      while(i<=9 && a[i]===0) i++;
+      if(i>9) return [0,0];
+      const key = i+':'+a.join(',');
+      const hit = memo.get(key); if(hit) return hit;
+      let best:[number,number]=[0,0];
+      { const b=cloneArr(a); b[i]--; best = maxp(best, dfs(b,i)); }                             // skip one
+      if(a[i]>=3){ const b=cloneArr(a); b[i]-=3; const r=dfs(b,i); best = maxp(best, [r[0]+1,r[1]]); } // pung
+      if(i<=7 && a[i]>0 && a[i+1]>0 && a[i+2]>0){ const b=cloneArr(a); b[i]--;b[i+1]--;b[i+2]--; const r=dfs(b,i); best=maxp(best,[r[0]+1,r[1]]);} // chow
+      if(a[i]>=2){ const b=cloneArr(a); b[i]-=2; const r=dfs(b,i); best = maxp(best,[r[0], r[1]+1]); } // pair as taatsu
+      if(i<=8 && a[i]>0 && a[i+1]>0){ const b=cloneArr(a); b[i]--;b[i+1]--; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); } // ryanmen
+      if(i<=7 && a[i]>0 && a[i+2]>0){ const b=cloneArr(a); b[i]--;b[i+2]--; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); } // kanchan/penchan
+      memo.set(key, best); return best;
+    }
+    return dfs(cnt.slice());
+  }
+  function honorsEval(honors:number[]){
+    let m=0,t=0,pairs=0;
+    for(let n=1;n<=7;n++){ const c=honors[n]; if(c>=3) m+=Math.floor(c/3); if(c%3===2){t+=1; pairs+=Math.floor(c/2);} }
+    return {m,t,pairs};
+  }
+  function hasAnyPair(suits:Record<string,number[]>) {
+    for(const s of ALL_SUITS) for(let n=1;n<=9;n++) if(suits[s][n]>=2) return true;
+    return false;
+  }
+  function normalHandShantenFull(hand:string[], meldsCount:number){
+    const { suits, honors } = toSuitCounts(hand);
+    let totalM=0,totalT=0;
+    for(const s of ALL_SUITS){ const r=evalSuitFull(suits[s]); totalM+=r[0]; totalT+=r[1]; }
+    const he = honorsEval(honors); totalM+=he.m; totalT+=he.t;
+    const mentsu = Math.min(4, totalM + meldsCount);
+    const taatsu = Math.min(totalT, Math.max(0, 4-mentsu));
+    const hasPair = he.pairs>0 || hasAnyPair(suits);
+    let sh = 8 - (2*mentsu + taatsu) - (hasPair?1:0);
+    return Math.max(-1, sh);
+  }
+  function sevenPairsShanten(hand:string[]){
+    const c:Record<string,number> = {};
+    for(const t of hand) c[t]=(c[t]||0)+1;
+    let pairs=0,kinds=0;
+    for(const k in c){ kinds++; pairs += Math.floor(c[k]/2); }
+    return Math.max(-1, 6 - pairs + Math.max(0, 7-kinds));
+  }
+  function bestShanten(hand:string[], meldsCount:number, includeHonors:boolean){
+    const a = normalHandShantenFull(hand, meldsCount);
+    const b = sevenPairsShanten(hand);
+    return Math.min(a,b);
+  }
+  function seenMapFromSnapshot(snapshot:any, selfHand:string[]){
+    const seen:Record<string,number>={};
+    const add=(t:string)=>{ seen[t]=(seen[t]||0)+1; };
+    for(const t of selfHand) add(t);
+    const players = Array.isArray(snapshot?.players)? snapshot.players: [];
+    for(const p of players){
+      const ds = Array.isArray(p?.discards)? p.discards: []; for(const d of ds) add(d);
+      const melds = Array.isArray(p?.melds)? p.melds: [];
+      for(const m of melds){ const ts = Array.isArray(m?.tiles)? m.tiles: []; for(const d of ts) add(d); }
+    }
+    const tableDis = Array.isArray(snapshot?.discards)? snapshot.discards: [];
+    for(const d of tableDis) add(d);
+    return seen;
+  }
+  function ukeire(hand:string[], snapshot:any, includeHonors:boolean){
+    const sh0 = bestShanten(hand, Array.isArray(snapshot?.players) ? 0 : 0, includeHonors);
+    const keys = allTileKeys(includeHonors);
+    const seen = seenMapFromSnapshot(snapshot||{}, hand);
+    let total=0; const detail:Record<string,number>={};
+    for(const k of keys){
+      const remain = Math.max(0, 4 - (seen[k]||0));
+      if(remain<=0) continue;
+      const h2 = hand.slice(); h2.push(k);
+      const sh1 = bestShanten(h2, 0, includeHonors);
+      if(sh1 < sh0){ total += remain; detail[k]=remain; }
+    }
+    return { total, detail, sh0 };
+  }
+  function handAfterRemove(orig:string[], tiles:string[]){
+    const h = [...orig];
+    for(const t of tiles){
+      const idx = h.indexOf(t);
+      if(idx>=0) h.splice(idx,1);
+    }
+    return h;
+  }
 
-        // 1) 摸牌
-        const t = w.shift()!;
-        ps[i].hand.push(t);
-        setWall([...w]);
+  // ----------- 规则相关小工具 -----------
+  function tileLabel(t:string){
+    const n = +t[0]; const s=t[1];
+    if(s==='W') return ['','一','二','三','四','五','六','七','八','九'][n] + '万';
+    if(s==='T') return ['','一','二','三','四','五','六','七','八','九'][n] + '条';
+    if(s==='B') return ['','一','二','三','四','五','六','七','八','九'][n] + '饼';
+    if(s==='Z') return ['','东','南','西','北','中','发','白'][n];
+    return t;
+  }
+  function sortTiles(arr:string[]){
+    const ord:Record<string,number> = { W:0, T:1, B:2, Z:3 };
+    return [...arr].sort((a,b)=>{
+      const sa=a[1], sb=b[1]; if(ord[sa]!==ord[sb]) return ord[sa]-ord[sb];
+      const na=+a[0], nb=+b[0]; return na-nb;
+    });
+  }
+  function possibleChiSeqs(hand:string[], taken:string){
+    const s=taken[1]; const n=+taken[0];
+    if(!['W','T','B'].includes(s)) return [];
+    const has=(t:string)=> hand.includes(t);
+    const seqs:string[][]=[];
+    if(n>=3 && has(`${n-2}${s}`) && has(`${n-1}${s}`)) seqs.push([`${n-2}${s}`,`${n-1}${s}`,taken]);
+    if(n>=2 && n<=8 && has(`${n-1}${s}`) && has(`${n+1}${s}`)) seqs.push([`${n-1}${s}`,taken,`${n+1}${s}`]);
+    if(n<=7 && has(`${n+1}${s}`) && has(`${n+2}${s}`)) seqs.push([taken,`${n+1}${s}`,`${n+2}${s}`]);
+    return seqs;
+  }
 
-        // 1.1) 自摸
-        const r = checkWin(ps[i].hand);
-        if(r.win){
-          appendLogs([`${ps[i].ai} 自摸：${r.fan.join('+')} = ${r.score}`]);
-          // 标记赢家并继续血战
-          if(table){ markWinner(table, i); setTable({ ...table });
+  // ----------- 反应/吃碰杠执行 -----------
+  function countInHand(h:string[], t:string){ return h.filter(x=>x===t).length; }
+  function canWinWith(h:string[], t:string){
+    const includeHonors = (ruleMode!=='SCZDXZ');
+    const sh = bestShanten([...h, t], 0, includeHonors);
+    return sh===-1;
+  }
+  function getReactionsAfterDiscard(tb:any){
+    const out = tb.lastDiscard?.tile as string; const from = tb.lastDiscard?.from as number;
+    if(!out && out!=='') return [];
+    const res:any[]=[];
+    // 顺序：下家、对家、上家
+    for(let k=1;k<=3;k++){
+      const seat = (from + k) % 4;
+      if(tb.players[seat]?.isWinner) continue;
+      const h = tb.players[seat].hand;
+      const acts:string[]=[];
+      // HU
+      if(canWinWith(h, out)) acts.push('HU');
+      // 明杠
+      if(countInHand(h, out)>=3) acts.push('GANG');
+      // 碰
+      if(countInHand(h, out)>=2) acts.push('PENG');
+      // 吃（仅下家）
+      if(k===1){
+        const seqs = possibleChiSeqs(h, out);
+        if(seqs.length) acts.push('CHI');
+      }
+      if(acts.length) res.push({ seat, actions: acts });
+    }
+    return res;
+  }
+  function priorityResolve(reacts:any[]){
+    if(!reacts.length) return [];
+    const hu = reacts.filter(r=>r.actions.includes('HU'));
+    if(hu.length) return hu; // 多家可胡
+    const gang = reacts.find(r=>r.actions.includes('GANG')); if(gang) return [gang];
+    const peng = reacts.find(r=>r.actions.includes('PENG')); if(peng) return [peng];
+    const chi  = reacts.find(r=>r.actions.includes('CHI'));  if(chi)  return [chi];
+    return [];
+  }
+  function applyMeldAction(tb:any, seat:number, type:MeldType, tiles:string[]){
+    const p = tb.players[seat];
+    if(type==='PENG'){
+      // 消耗两张手牌（第三张来自弃牌）
+      const t = tiles[0];
+      for(let c=0;c<2;c++){ const idx=p.hand.indexOf(t); if(idx>=0) p.hand.splice(idx,1); }
+      p.melds = [...(p.melds||[]), { type:'PENG', tiles:[t,t,t] }];
+    }else if(type==='CHI'){
+      const taken = tb.lastDiscard?.tile;
+      const need = tiles.filter(x=>x!==taken);
+      for(const t of need){ const idx=p.hand.indexOf(t); if(idx>=0) p.hand.splice(idx,1); }
+      p.melds = [...(p.melds||[]), { type:'CHI', tiles:[...tiles] }];
+    }else if(type==='GANG'){
+      const t = tiles[0];
+      // 明杠：从手里去三张，弃牌一张
+      for(let c=0;c<3;c++){ const idx=p.hand.indexOf(t); if(idx>=0) p.hand.splice(idx,1); }
+      p.melds = [...(p.melds||[]), { type:'GANG', tiles:[t,t,t,t] }];
+    }
+    tb.lastDiscard = null;
+  }
+  function applyConcealedGangAction(tb:any, seat:number, t:string){
+    const p = tb.players[seat];
+    for(let c=0;c<4;c++){ const idx=p.hand.indexOf(t); if(idx>=0) p.hand.splice(idx,1); }
+    p.melds = [...(p.melds||[]), { type:'ANGANG', tiles:[t,t,t,t] }];
+  }
+  function applyAddGangAction(tb:any, seat:number, t:string){
+    const p = tb.players[seat];
+    const idx = p.hand.indexOf(t);
+    if(idx>=0) p.hand.splice(idx,1);
+    // 找到对应的碰，并扩展为杠
+    const m = (p.melds||[]).find(m=>m.type==='PENG' && m.tiles[0]===t);
+    if(m){ m.type='GANG'; m.tiles=[t,t,t,t]; }
+    else{ // 兜底：直接作为暗杠
+      p.melds = [...(p.melds||[]), { type:'GANG', tiles:[t,t,t,t] }];
+    }
+  }
 
-            // 同步玩家可视状态（手牌/面子/弃牌）
-            for(let si=0; si<table.players.length; si++){
-              if(ps[si]){
-                ps[si].hand = [...(table.players[si]?.hand||[])];
-                ps[si].discards = [...(table.players[si]?.discards||[])];
-                // @ts-ignore
-                ps[si].melds = [...(table.players[si]?.melds||[])];
-              }
-            }
-            setPlayers([...ps]);
-}
-setPlayers([...ps]);
-          await new Promise(r=>setTimeout(r, intervalMs));
-          continue;
+  // ----------- 取牌墙、发牌 -----------
+  function generateWall(mode:RuleMode){
+    const out:string[]=[];
+    const suits = ['W','T','B'];
+    for(const s of suits){ for(let n=1;n<=9;n++){ for(let k=0;k<4;k++) out.push(`${n}${s}`); } }
+    if(mode==='BASIC'){ for(let n=1;n<=7;n++){ for(let k=0;k<4;k++) out.push(`${n}Z`); } } // 136张
+    return out;
+  }
+  function shuffle<T>(a:T[]){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [a[i],a[j]]=[a[j],a[i]]; } }
+
+  // ----------- AI 调用 -----------
+  async function askAI(provider:string, hand:string[], snapshot:any){
+    try{
+      const resp = await fetch(`/api/aiPlay?provider=${encodeURIComponent(provider)}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ hand, keys, snapshot })
+      });
+      if(!resp.ok) throw new Error('api fail');
+      const data = await resp.json();
+      return data;
+    }catch(e){
+      // 本地兜底：丢向听最优、再看uke、再看连接
+      const includeHonors = (ruleMode!=='SCZDXZ');
+      const meldsCount = 0;
+      const keepScore=(x:string)=>{
+        const s=x[1], n=+x[0]; let v=0;
+        const has=(t:string)=> hand.includes(t);
+        if(hand.filter(t=>t===x).length>=2) v+=2;
+        if(s!=='Z'){
+          if(has(`${n-1}${s}`)) v+=2; if(has(`${n+1}${s}`)) v+=2;
+          if(has(`${n-2}${s}`)||has(`${n+2}${s}`)) v+=1;
         }
+        return v;
+      };
+      let drop = hand[0], bestSh=999, bestUke=-1, bestKeep=1e9;
+      for(const x of hand){
+        const h2 = hand.slice(); const idx=h2.indexOf(x); if(idx>=0) h2.splice(idx,1);
+        const sh = bestShanten(h2, meldsCount, includeHonors);
+        const uk = ukeire(h2, snapshot, includeHonors).total;
+        const kp = -keepScore(x);
+        if(sh<bestSh || (sh===bestSh && (uk>bestUke || (uk===bestUke && kp<bestKeep)))){
+          bestSh=sh; bestUke=uk; bestKeep=kp; drop=x;
+        }
+      }
+      const reason = `local fallback；shanten=${bestSh}，uke=${bestUke}`;
+      return { tile: drop, reason, meta:{ usedApi:false, provider:'local', detail:'shanten+uke' } };
+    }
+  }
 
-        // 1.2) 杠（优先 BUGANG，再看 ANGANG）
-        if(table){
-          const me = table.players[i];
-          // 补杠：已有碰，且摸到同张 t
-          const hasPeng = (me.melds||[]).some((m:any)=>m.type==='PENG' && m.tiles && m.tiles[0]===t);
-          if(hasPeng){
-            applyAddGangAction(table, i, t);
-            appendLogs([`➡️ ${ps[i].ai} 补杠 ${tileLabel(t)}（补摸一张）`]);
-            if(table){ table.wall = [...w]; }
-            setTable({ ...table });
-            setWall([...w]);
+  // ----------- 核心一轮流程（整洁版） -----------
+  async function playOneHand(ps: PlayerState[], w: string[], rRef: React.RefObject<boolean>) {
+    if (!rRef?.current) { appendLogs(['回合未开始或已停止']); return; }
 
-            // 同步玩家可视状态（手牌/面子/弃牌）
-            for(let si=0; si<table.players.length; si++){
-              if(ps[si]){
-                ps[si].hand = [...(table.players[si]?.hand||[])];
-                ps[si].discards = [...(table.players[si]?.discards||[])];
-                // @ts-ignore
-                ps[si].melds = [...(table.players[si]?.melds||[])];
+    const skipDrawOnce = new Set<number>();
+    const sleep = (ms:number)=> new Promise(r=>setTimeout(r, ms));
+    const includeHonors = (ruleMode !== 'SCZDXZ');
+    const seatKeys = ['E','S','W','N'] as const;
+    const stillActive = ()=> (table?.players||ps).filter(p=>!p?.isWinner).length;
+
+    outer: while (rRef.current && w.length>0 && stillActive()>1) {
+      for (let i=0; i<ps.length; i++) {
+        if (!rRef.current) { appendLogs(['回合未开始或已停止']); break outer; }
+        if (table?.players?.[i]?.isWinner || ps[i]?.isWinner) continue;
+        if (!table) break outer;
+
+        // 1) 抓牌
+        if(!skipDrawOnce.has(i)){
+          if (w.length<=0) break outer;
+          const t = w.shift()!;
+          ps[i].hand.push(t);
+          appendLogs([`🀄 ${ps[i].ai} 摸 ${tileLabel(t)}`]);
+
+          table.wall = [...w]; setWall([...w]);
+          setPlayers([...ps]);
+          table.players = ps.map((p,idx)=>({
+            ...p, hand:[...(p.hand||[])], discards:[...(p.discards||[])],
+            melds:(table.players?.[idx]?.melds||[]), isWinner:(table.players?.[idx]?.isWinner||false),
+          }));
+          table.turn = i; setTable({ ...table });
+
+          // 1.1) 暗杠（不变差才做）
+          const cnt:Record<string,number>={}; for(const x of ps[i].hand) cnt[x]=(cnt[x]||0)+1;
+          const candidates = Object.keys(cnt).filter(k=>cnt[k]>=4);
+          if(candidates.length){
+            const mc = (table.players[i]?.melds||[]).length;
+            const before = bestShanten(ps[i].hand, mc, includeHonors);
+            let pick: string | null = null, bestGain=-999, bestUke=-1;
+            for(const k of candidates){
+              const afterH = handAfterRemove(ps[i].hand, [k,k,k,k]);
+              const after = bestShanten(afterH, mc+1, includeHonors);
+              if(after<=before){
+                const uk = ukeire(afterH, table, includeHonors).total;
+                const gain = before-after;
+                if(gain>bestGain || (gain===bestGain && uk>bestUke)){ bestGain=gain; bestUke=uk; pick=k; }
               }
             }
-            setPlayers([...ps]);
-
-            // 杠后自动补一张到手里已经在后端完成；此处不再自摸判断，继续流程
-          }else{
-            // 暗杠：四张相同
-            const counts:Record<string,number>={}; for(const x of ps[i].hand) counts[x]=(counts[x]||0)+1;
-            const angang = Object.entries(counts).find(([k,v])=>v===4)?.[0];
-            if(angang){
-              const meldsCount = (table.players[i]?.melds||[]).length;
-              const includeHonors = (ruleMode!=='SCZDXZ');
-                const before = bestShanten(ps[i].hand, meldsCount, includeHonors);
-                const afterHand = handAfterRemove(ps[i].hand, [angang,angang,angang,angang]);
-                const after = bestShanten(afterHand, meldsCount+1, includeHonors);
-                const ukeAfter = ukeire(afterHand, table, includeHonors);
-              if(after <= before){
-                applyConcealedGangAction(table, i, angang as string);
-                appendLogs([`➡️ ${ps[i].ai} 暗杠 ${tileLabel(angang)}（补摸一张，shanten ${before}→${after}）`]);
+            if(pick){
+              applyConcealedGangAction(table, i, pick);
+              appendLogs([`➡️ ${ps[i].ai} 暗杠 ${tileLabel(pick)}（补摸一张，sh ${before}→${before-bestGain}${bestUke>=0?`，uke ${bestUke}`:''}）`]);
+              setTable({ ...table });
+              if(w.length>0){
+                const g = w.shift()!;
+                ps[i].hand.push(g);
+                table.wall=[...w]; setWall([...w]); setPlayers([...ps]);
+                appendLogs([`🀄 ${ps[i].ai} 补摸 ${tileLabel(g)}`]);
                 setTable({ ...table });
-              } else {
-                appendLogs([`↩️ 放弃暗杠 ${tileLabel(angang)}（shanten ${before}→${after} 变差）`]);
               }
-            }setWall([...w]);
-
-            // 同步玩家可视状态（手牌/面子/弃牌）
-            for(let si=0; si<table.players.length; si++){
-              if(ps[si]){
-                ps[si].hand = [...(table.players[si]?.hand||[])];
-                ps[si].discards = [...(table.players[si]?.discards||[])];
-                // @ts-ignore
-                ps[si].melds = [...(table.players[si]?.melds||[])];
-              }
-            }
-            setPlayers([...ps]);
-
             }
           }
+          // 1.2) 补杠（碰升级）
+          const myMelds = (table.players[i]?.melds||[]);
+          for(const m of myMelds){
+            if(m.type==='PENG'){
+              const t0 = m.tiles[0];
+              if(ps[i].hand.includes(t0)){
+                applyAddGangAction(table, i, t0);
+                appendLogs([`➡️ ${ps[i].ai} 补杠 ${tileLabel(t0)}（补摸一张）`]);
+                setTable({ ...table });
+                if(w.length>0){
+                  const g = w.shift()!;
+                  ps[i].hand.push(g);
+                  table.wall=[...w]; setWall([...w]); setPlayers([...ps]);
+                  appendLogs([`🀄 ${ps[i].ai} 补摸 ${tileLabel(g)}`]);
+                  setTable({ ...table });
+                }
+              }
+            }
+          }
+        }else{
+          skipDrawOnce.delete(i);
         }
 
-        // 2) 出牌（调用 /api/aiPlay 决策 + 本地兜底）
+        // 2) 出牌（AI）
+        if (!rRef.current) { appendLogs(['回合未开始或已停止']); break outer; }
         const snapshot:any = table ? { players: table.players, discards: table.discards } : {};
-        const seatKeys = ['E','S','W','N'] as const; const seatKey = seatKeys[i] || 'E';
+        const seatKey = seatKeys[i] || 'E';
         const provider = (seatProvider as any)[seatKey] || 'local';
         const decide = await askAI(provider, [...ps[i].hand], snapshot);
         const out = (decide && decide.tile && ps[i].hand.includes(decide.tile)) ? decide.tile : ps[i].hand[0];
         const reasonText = decide?.reason || 'local';
-        // 执行弃牌
-        const idxTile = ps[i].hand.indexOf(out);
-        ps[i].hand.splice(idxTile,1);
+
+        const idxTile = ps[i].hand.indexOf(out); if(idxTile>=0) ps[i].hand.splice(idxTile,1);
         ps[i].discards.push(out);
         appendLogs([`${ps[i].ai} 打出 ${tileLabel(out)} — ${decide?.meta?.usedApi ? 'API:' + (decide?.meta?.provider||'local') : '本地'}；${reasonText}`]);
+
+        table.players = ps.map((p,idx)=>({
+          ...p, hand:[...(p.hand||[])], discards:[...(p.discards||[])],
+          melds:(table.players?.[idx]?.melds||[]), isWinner:(table.players?.[idx]?.isWinner||false),
+        }));
+        table.wall = [...w]; setWall([...w]);
+        table.lastDiscard = { tile: out, from: i };
+        table.turn = i;
+        setPlayers([...ps]);
+        setTable({ ...table });
+
         // 3) 询问反应并执行
-        if(table){
-          table.players = ps.map((p,idx)=>({ ...p, melds: (table.players[idx]?.melds||[]), isWinner: (table.players[idx]?.isWinner||false) }));
-          table.wall = [...w];
-          table.lastDiscard = { tile: out, from: i };
-          table.turn = i;
-          const reacts = getReactionsAfterDiscard(table);
-          const resolved = priorityResolve(reacts);
-          if(resolved && resolved.length>0){
-            const huSeats = resolved.filter(r=>r.actions.includes('HU')).map(r=>r.seat);
-            if(huSeats.length>0){
-              for(const s of huSeats){
-                markWinner(table, s);
-                appendLogs([`➡️ ${ps[s].ai} 荣和（接炮） ${tileLabel(out)}`]);
-              }
-            }else{
-              const gangSeat = resolved.find(r=>r.actions.includes('GANG'))?.seat;
-              if(typeof gangSeat==='number'){
-                applyMeldAction(table, gangSeat, 'GANG', [out,out,out,out]);
-                appendLogs([`➡️ ${ps[gangSeat].ai} 明杠 ${tileLabel(out)}（补摸一张）`]);
-              }else{
-                const pengSeat = resolved.find(r=>r.actions.includes('PENG'))?.seat;
-              if(typeof pengSeat==='number'){
-                const actor = pengSeat;
-                const meldsCount = (table.players[actor]?.melds||[]).length;
-                const includeHonors = (ruleMode!=='SCZDXZ');
-                const before = bestShanten(ps[actor].hand, meldsCount, includeHonors);
-                const afterHand = handAfterRemove(ps[actor].hand, [out,out]);
-                const after = bestShanten(afterHand, meldsCount+1, includeHonors);
-                const ukeAfter = ukeire(afterHand, table, includeHonors);
-                if(after <= before){
-                  applyMeldAction(table, actor, 'PENG', [out,out,out]);
-                  appendLogs([`➡️ ${ps[actor].ai} 碰 ${tileLabel(out)}（shanten ${before}→${after}）`]);
-                } else {
-                  appendLogs([`↩️ 放弃碰 ${tileLabel(out)}（shanten ${before}→${after} 变差）`]);
-                }
-              }else{
-                  const chiSeat = resolved.find(r=>r.actions.includes('CHI'))?.seat;
-                if(typeof chiSeat==='number'){
-                  const actor = chiSeat;
-                  const seqs = possibleChiSeqs(ps[actor].hand, out);
-                  let bestSeq:string[]|null = null; let bestDelta=999;
-                  const meldsCount = (table.players[actor]?.melds||[]).length;
-                  const before = shantenApprox(ps[actor].hand, meldsCount);
-                  for(const seq of seqs){
-                    const myTwo = seq.filter(x=>x!==out);
-                    const afterHand = handAfterRemove(ps[actor].hand, myTwo);
-                    const after = shantenApprox(afterHand, meldsCount+1);
-                    const delta = after - before;
-                    if(after <= before && delta < bestDelta){ bestDelta = delta; bestSeq = seq; }
-                  }
-                  if(bestSeq){
-                    applyMeldAction(table, actor, 'CHI', bestSeq);
-                    appendLogs([`➡️ ${ps[actor].ai} 吃 ${bestSeq.map(tileLabel).join('-')}（shanten ${before}→${before+bestDelta}）`]);
-                  }else{
-                    appendLogs([`↩️ 放弃吃 ${tileLabel(out)}（吃后听牌形势不佳）`]);
-                  }
-                }
-                }
-              }
-            }
+        const reacts = getReactionsAfterDiscard(table);
+        const resolved = priorityResolve(reacts);
+
+        // 3.1 多家可胡
+        const huSeats = resolved.filter(r=>r.actions.includes('HU')).map(r=>r.seat);
+        if(huSeats.length){
+          for(const s of huSeats){
+            table.players[s].isWinner = true;
+            ps[s].isWinner = true;
+            appendLogs([`🎉 ${ps[s].ai} 荣和（${tileLabel(out)}）`]);
+          }
+          setPlayers([...ps]); setTable({ ...table });
+          if ((table.players||ps).filter(p=>!p.isWinner).length<=1) break outer;
+        }
+
+        // 3.2 明杠
+        const gangSeat = resolved.find(r=>r.actions.includes('GANG'))?.seat;
+        if(typeof gangSeat==='number' && !table.players[gangSeat].isWinner){
+          const actor = gangSeat;
+          applyMeldAction(table, actor, 'GANG', [out,out,out,out]);
+          appendLogs([`➡️ ${ps[actor].ai} 明杠 ${tileLabel(out)}（补摸一张）`]);
+          setTable({ ...table });
+          if(w.length>0){
+            const g = w.shift()!;
+            ps[actor].hand.push(g);
+            table.wall=[...w]; setWall([...w]); setPlayers([...ps]);
+            appendLogs([`🀄 ${ps[actor].ai} 补摸 ${tileLabel(g)}`]);
             setTable({ ...table });
+          }
+          skipDrawOnce.add(actor); // 直接出
+          i = actor - 1; // 下一循环到 actor
+          continue;
+        }
+
+        // 3.3 碰
+        const pengSeat = resolved.find(r=>r.actions.includes('PENG'))?.seat;
+        if(typeof pengSeat==='number' && !table.players[pengSeat].isWinner){
+          const actor = pengSeat;
+          const mc = (table.players[actor]?.melds||[]).length;
+          const before = bestShanten(ps[actor].hand, mc, includeHonors);
+          const afterHand = handAfterRemove(ps[actor].hand, [out,out]);
+          const after = bestShanten(afterHand, mc+1, includeHonors);
+          if(after<=before){
+            applyMeldAction(table, actor, 'PENG', [out,out,out]);
+            const uke = ukeire(afterHand, table, includeHonors).total;
+            appendLogs([`➡️ ${ps[actor].ai} 碰 ${tileLabel(out)}（sh ${before}→${after}，uke ${uke}）`]);
+            setTable({ ...table });
+            skipDrawOnce.add(actor);
+            i = actor - 1;
+            continue;
+          }else{
+            appendLogs([`↩️ 放弃碰 ${tileLabel(out)}（sh ${before}→${after} 变差）`]);
           }
         }
 
+        // 3.4 吃（仅下家）
+        const chiSeat = resolved.find(r=>r.actions.includes('CHI'))?.seat;
+        if(typeof chiSeat==='number' && !table.players[chiSeat].isWinner){
+          const actor = chiSeat;
+          const seqs = possibleChiSeqs(ps[actor].hand, out);
+          const mc = (table.players[actor]?.melds||[]).length;
+          const before = bestShanten(ps[actor].hand, mc, includeHonors);
+          let chooseSeq:string[]|null=null, bestGain=-999, bestUke=-1;
+          for(const seq of seqs){
+            const myTwo = seq.filter(x=>x!==out);
+            const afterHand = handAfterRemove(ps[actor].hand, myTwo);
+            const after = bestShanten(afterHand, mc+1, includeHonors);
+            if(after<=before){
+              const uk = ukeire(afterHand, table, includeHonors).total;
+              const gain = before-after;
+              if(gain>bestGain || (gain===bestGain && uk>bestUke)){ bestGain=gain; bestUke=uk; chooseSeq=seq; }
+            }
+          }
+          if(chooseSeq){
+            applyMeldAction(table, actor, 'CHI', chooseSeq);
+            appendLogs([`➡️ ${ps[actor].ai} 吃 ${chooseSeq.map(tileLabel).join('-')}（sh ${before}→${before-bestGain}，uke ${bestUke}）`]);
+            setTable({ ...table });
+            skipDrawOnce.add(actor);
+            i = actor - 1;
+            continue;
+          }else{
+            appendLogs([`↩️ 放弃吃 ${tileLabel(out)}（吃后不更近）`]);
+          }
+        }
+
+        // 无人反应，下一家
         psRef.current = ps; wallRef.current = w;
         setPlayers([...ps]);
-        setWall([...w]);
-        await new Promise(r=>setTimeout(r, intervalMs));
+        await sleep(intervalMs);
       }
     }
-    appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮结束 ——`]);
+
     setHandRunning(false);
-    setPaused(false);
-    psRef.current = null; wallRef.current = null;
-    runningRef.current = false;
-    runningRef.current = false;
-    setHandNo(x=>x+1);
+    if(rRef) rRef.current = false;
+    appendLogs(['✅ 本轮结束']);
   }
 
-  
+  // ----------- 视图 -----------
   return (
     <div className="max-w">
       <h1 style={{fontSize:22,fontWeight:700,marginBottom:12}}>Mahjong AI Match — 吃/碰/杠/胡（四川/传统 可切换）</h1>
@@ -582,59 +591,43 @@ setPlayers([...ps]);
           <label className="small">最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
           <label className="small">步进(ms)：<input className="w-24" value={intervalMs} onChange={e=>setIntervalMs(Math.max(0,parseInt(e.target.value||'0',10)||0))} /></label>
           <label className="small">起始分：<input className="w-24" value={startScore} onChange={e=>setStartScore(Math.max(0,parseInt(e.target.value||"0",10)||0))} /></label>
-
           <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
           <button onClick={startNewMatch}>开始新比赛</button>
           <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
-          <span className="small" style={{marginLeft:8}}>余牌：{wall.length}</span>
+          <button onClick={togglePause} disabled={!handRunning}>{paused ? '继续' : '暂停'}</button>
+          <button onClick={stopHand} disabled={!handRunning}>停止当前轮次</button>
+          <span className="small" style={{marginLeft:8}}>余牌：{(table?.wall?.length ?? wall.length)}</span>
         </div>
 
-        <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
-          <div>
-            
         <div style={{marginTop:8}}>
           <div className="small mb-1">座位与AI：</div>
           <div style={{display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:8}}>
             <label className="small">东：
               <select value={seatProvider.E} onChange={e=>setSeatProvider({...seatProvider, E:e.target.value})}>
-                <option value="local">内置(Local)</option>
-                <option value="kimi2">Kimi</option>
-                <option value="kimi">Kimi(备用)</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok</option>
+                <option value="local">内置(Local)</option><option value="kimi2">Kimi</option><option value="kimi">Kimi(备用)</option><option value="gemini">Gemini</option><option value="grok">Grok</option>
               </select>
             </label>
             <label className="small">南：
               <select value={seatProvider.S} onChange={e=>setSeatProvider({...seatProvider, S:e.target.value})}>
-                <option value="local">内置(Local)</option>
-                <option value="kimi2">Kimi</option>
-                <option value="kimi">Kimi(备用)</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok</option>
+                <option value="local">内置(Local)</option><option value="kimi2">Kimi</option><option value="kimi">Kimi(备用)</option><option value="gemini">Gemini</option><option value="grok">Grok</option>
               </select>
             </label>
             <label className="small">西：
               <select value={seatProvider.W} onChange={e=>setSeatProvider({...seatProvider, W:e.target.value})}>
-                <option value="local">内置(Local)</option>
-                <option value="kimi2">Kimi</option>
-                <option value="kimi">Kimi(备用)</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok</option>
+                <option value="local">内置(Local)</option><option value="kimi2">Kimi</option><option value="kimi">Kimi(备用)</option><option value="gemini">Gemini</option><option value="grok">Grok</option>
               </select>
             </label>
             <label className="small">北：
               <select value={seatProvider.N} onChange={e=>setSeatProvider({...seatProvider, N:e.target.value})}>
-                <option value="local">内置(Local)</option>
-                <option value="kimi2">Kimi</option>
-                <option value="kimi">Kimi(备用)</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok</option>
+                <option value="local">内置(Local)</option><option value="kimi2">Kimi</option><option value="kimi">Kimi(备用)</option><option value="gemini">Gemini</option><option value="grok">Grok</option>
               </select>
             </label>
           </div>
         </div>
-    
-          <div className="small mb-1">Kimi（Moonshot）API Key</div>
+
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
+          <div>
+            <div className="small mb-1">Kimi（Moonshot）API Key</div>
             <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
           </div>
           <div>
@@ -672,8 +665,15 @@ setPlayers([...ps]);
 
       <div className="card">
         <div className="font-semibold mb-2">日志</div>
-        <div className="log-sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\\n')}</div>
+        <div className="log-sm" style={{whiteSpace:'pre-wrap'}}>{logs.join('\n')}</div>
       </div>
     </div>
   );
+}
+
+// ---------- 小组件 ----------
+function Tile({t, small}:{t:string; small?:boolean}){
+  const n=+t[0], s=t[1];
+  const label = s==='W'? `${n}万` : s==='T'? `${n}条` : s==='B'? `${n}饼` : ['','东','南','西','北','中','发','白'][n]||t;
+  return <span className={`tile ${small?'tile-sm':''}`}>{label}</span>;
 }
