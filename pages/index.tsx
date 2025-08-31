@@ -45,6 +45,169 @@ export default function Home(){
 
   function appendLogs(lines:string[]){ setLog(prev => { const next=[...prev]; for(const ln of lines){ next.push(ln); } return next; }); }
 
+
+  // ===== 完全体 Shanten + Uke-ire =====
+  const ALL_SUITS = ['W','B','T'] as const;
+  function allTileKeys(includeHonors:boolean){
+    const arr:string[] = [];
+    for(const s of ALL_SUITS){ for(let n=1;n<=9;n++) arr.push(`${n}${s}`); }
+    if(includeHonors){ for(let n=1;n<=7;n++) arr.push(`${n}Z`); }
+    return arr;
+  }
+  function toSuitCounts(hand:string[]){
+    const m:Record<string, number[]> = { W:Array(10).fill(0), B:Array(10).fill(0), T:Array(10).fill(0) };
+    const honors = Array(8).fill(0); // 1..7Z
+    for(const t of hand){
+      const s=t[1]; const n=parseInt(t[0],10)||0;
+      if(s==='W'||s==='B'||s==='T'){ m[s][n]++; } else if(s==='Z'){ honors[n]++; }
+    }
+    return { suits:m, honors };
+  }
+  function cloneArr(a:number[]){ return a.slice(); }
+  function evalSuitFull(cnt:number[]){
+    // 深度搜索该门花色的最好 (mentsu, taatsu)
+    const memo = new Map<string,[number,number]>();
+    function dfs(a:number[], i=1):[number,number]{
+      while(i<=9 && a[i]===0) i++;
+      if(i>9) return [0,0];
+      const key = i+':'+a.join(',');
+      if(memo.has(key)) return memo.get(key)!;
+      let best:[number,number]=[0,0];
+      // 1) 跳过一张（用于后续与相邻组成搭子）
+      {
+        const b = cloneArr(a); b[i]--;
+        const [m,t] = dfs(b, i);
+        best = maxPair(best, [m, t]);
+      }
+      // 2) 刻子
+      if(a[i]>=3){
+        const b = cloneArr(a); b[i]-=3;
+        const [m,t] = dfs(b, i);
+        best = maxPair(best, [m+1, t]);
+      }
+      // 3) 顺子
+      if(i<=7 && a[i+1]>0 && a[i+2]>0 && a[i]>0){
+        const b = cloneArr(a); b[i]--; b[i+1]--; b[i+2]--;
+        const [m,t] = dfs(b, i);
+        best = maxPair(best, [m+1, t]);
+      }
+      // 4) 对子作为搭子
+      if(a[i]>=2){
+        const b = cloneArr(a); b[i]-=2;
+        const [m,t] = dfs(b, i);
+        best = maxPair(best, [m, t+1]);
+      }
+      // 5) 两面搭子 i,i+1
+      if(i<=8 && a[i]>0 && a[i+1]>0){
+        const b = cloneArr(a); b[i]--; b[i+1]--;
+        const [m,t] = dfs(b, i);
+        best = maxPair(best, [m, t+1]);
+      }
+      // 6) 岔张搭子 i,i+2
+      if(i<=7 && a[i]>0 && a[i+2]>0){
+        const b = cloneArr(a); b[i]--; b[i+2]--;
+        const [m,t] = dfs(b, i);
+        best = maxPair(best, [m, t+1]);
+      }
+      memo.set(key, best);
+      return best;
+    }
+    function maxPair(a:[number,number], b:[number,number]){
+      if(b[0]>a[0]) return b;
+      if(b[0]===a[0] && b[1]>a[1]) return b;
+      return a;
+    }
+    return dfs(cnt.slice());
+  }
+  function honorsEval(honors:number[]){
+    // honors only triplets & pairs
+    let m=0,t=0,pairs=0;
+    for(let n=1;n<=7;n++){
+      const c = honors[n];
+      if(c>=3){ m += Math.floor(c/3); }
+      if(c%3===2){ t += 1; pairs += Math.floor(c/2); }
+      else if(c%3===1){ /* single no taatsu */ }
+    }
+    return { m, t, pairs };
+  }
+  function normalHandShantenFull(hand:string[], meldsCount:number){
+    const { suits, honors } = toSuitCounts(hand);
+    let totalM = 0, totalT = 0;
+    // 数牌三门
+    for(const s of ALL_SUITS){
+      const [m,t] = evalSuitFull(suits[s]);
+      totalM += m; totalT += t;
+    }
+    // 字牌
+    const he = honorsEval(honors);
+    totalM += he.m; totalT += he.t;
+    // 限制搭子数：不能超过 (4 - (鸣面子 + 门清面子))
+    const mentsu = Math.min(4, totalM + meldsCount);
+    const maxTaatsu = Math.max(0, 4 - mentsu);
+    const taatsu = Math.min(totalT, maxTaatsu);
+    // 判断是否有对子充当将：若无，则 shanten +1
+    const hasPair = (he.pairs > 0) || hasAnyPair(suits);
+    let sh = 8 - (2*mentsu + taatsu) - (hasPair?1:0);
+    return Math.max(-1, sh);
+  }
+  function hasAnyPair(suits:Record<string,number[]>){
+    for(const s of ALL_SUITS){ for(let n=1;n<=9;n++){ if(suits[s][n]>=2) return true; } }
+    return false;
+  }
+  function sevenPairsShanten(hand:string[], includeHonors:boolean){
+    // 7对向听：需要7个对子，不能有刻子（刻子算1对，其余2张浪费）
+    const cnt:Record<string,number> = {};
+    for(const t of hand){ cnt[t]=(cnt[t]||0)+1; }
+    let pairs=0, extras=0, kinds=0;
+    for(const key of Object.keys(cnt)){
+      kinds++;
+      pairs += Math.floor(cnt[key]/2);
+      if(cnt[key]>=3) extras++; // 刻子多出来一张
+    }
+    let sh = 6 - pairs + Math.max(0, 7 - kinds);
+    return Math.max(-1, sh);
+  }
+  function bestShanten(hand:string[], meldsCount:number, includeHonors:boolean){
+    const a = normalHandShantenFull(hand, meldsCount);
+    const b = sevenPairsShanten(hand, includeHonors);
+    return Math.min(a,b);
+  }
+  function seenMapFromSnapshot(snapshot:any, selfHand:string[]){
+    const seen:Record<string,number>={};
+    const add=(t:string)=>{ seen[t]=(seen[t]||0)+1; };
+    for(const t of selfHand) add(t);
+    const players = Array.isArray(snapshot?.players)? snapshot.players: [];
+    for(const p of players){
+      const ds = Array.isArray(p?.discards)? p.discards: [];
+      for(const d of ds) add(d);
+      const melds = Array.isArray(p?.melds)? p.melds: [];
+      for(const m of melds){
+        const tiles = Array.isArray(m?.tiles)? m.tiles: [];
+        for(const d of tiles) add(d);
+      }
+    }
+    const tableDis = Array.isArray(snapshot?.discards)? snapshot.discards: [];
+    for(const d of tableDis) add(d);
+    return seen;
+  }
+  function ukeire(hand:string[], snapshot:any, includeHonors:boolean){
+    const meldsCount = Array.isArray(snapshot?.players) ? (snapshot.players.find((x:any)=>x?.hand===hand)?.melds?.length || 0) : 0;
+    const sh0 = bestShanten(hand, meldsCount, includeHonors);
+    const keys = allTileKeys(includeHonors);
+    const seen = seenMapFromSnapshot(snapshot||{}, hand);
+    let total=0; const detail:Record<string,number>={};
+    for(const k of keys){
+      const remain = Math.max(0, 4 - (seen[k]||0));
+      if(remain<=0) continue;
+      const h2 = hand.slice(); h2.push(k);
+      const sh1 = bestShanten(h2, meldsCount, includeHonors);
+      if(sh1 < sh0){
+        total += remain; detail[k]=remain;
+      }
+    }
+    return { total, detail, sh0 };
+  }
+
   function sortTiles(arr:string[]){
     const order=(t:string)=>{
       const suitRank = t[1]==='W'?0:(t[1]==='B'?1:(t[1]==='T'?2:3));
@@ -54,6 +217,80 @@ export default function Home(){
   }
 
   // 计算可以吃的三张序列（包含目标牌）
+
+  // ---- 简易 Shanten 估算：支持 4面子+1将，考虑已鸣牌数 ----
+  function shantenApprox_OBSOLETE(hand:string[], meldsCount:number){
+    // 拷贝手，按花色统计
+    const bySuit:Record<string, number[]> = { W:Array(10).fill(0), B:Array(10).fill(0), T:Array(10).fill(0) };
+    const honors:Record<string, number> = {}; // 四川无字牌时为空
+    for(const t of hand){
+      const s=t[1]; const n=parseInt(t[0],10);
+      if(s==='W'||s==='B'||s==='T'){ bySuit[s][n]++; }
+      else { honors[t]=(honors[t]||0)+1; }
+    }
+    // 先贪心吃顺（每门按 1-7）
+    let mentsuInHand = 0;
+    const suitClone=(arr:number[])=>arr.slice();
+    function eatSeq(arr:number[]){
+      let made=0;
+      for(let n=1;n<=7;n++){
+        while(arr[n]>0 && arr[n+1]>0 && arr[n+2]>0){
+          arr[n]--;arr[n+1]--;arr[n+2]--; made++;
+        }
+      }
+      return made;
+    }
+    function takePungs(arr:number[]){
+      let made=0;
+      for(let n=1;n<=9;n++){
+        while(arr[n]>=3){ arr[n]-=3; made++; }
+      }
+      return made;
+    }
+    let tmp;
+    // 尝试两种顺序：先顺后刻、先刻后顺，取最大
+    let bestM=0;
+    for(const order of [0,1]){
+      const W=suitClone(bySuit.W), B=suitClone(bySuit.B), T=suitClone(bySuit.T);
+      let m=0;
+      if(order===0){
+        m+=eatSeq(W)+eatSeq(B)+eatSeq(T);
+        m+=takePungs(W)+takePungs(B)+takePungs(T);
+      }else{
+        m+=takePungs(W)+takePungs(B)+takePungs(T);
+        m+=eatSeq(W)+eatSeq(B)+eatSeq(T);
+      }
+      bestM=Math.max(bestM,m);
+    }
+    mentsuInHand = bestM;
+
+    // 计算将（对子）
+    let pairs=0;
+    for(const s of ['W','B','T']){
+      for(let n=1;n<=9;n++){
+        const cnt = bySuit[s][n];
+        if(cnt>=2) pairs += Math.floor(cnt/2);
+      }
+    }
+    for(const k in honors){ if(honors[k]>=2) pairs += Math.floor(honors[k]/2); }
+
+    // 已鸣的面子数
+    const mentsuTotal = mentsuInHand + (meldsCount||0);
+    const pairFlag = pairs>0 ? 1 : 0;
+    // 目标：4面子+1将 → 8 - (2*面子 + 将)
+    const sh = 8 - (2*mentsuTotal + pairFlag);
+    return Math.max(-1, sh); // -1 即听牌
+  }
+
+  function handAfterRemove(orig:string[], tiles:string[]){
+    const h = [...orig];
+    for(const t of tiles){
+      const idx = h.indexOf(t);
+      if(idx>=0) h.splice(idx,1);
+    }
+    return h;
+  }
+
   function possibleChiSeqs(hand:string[], taken:string){
     const s = taken[1]; const n = parseInt(taken[0],10);
     const has=(x:string)=>hand.includes(x);
@@ -207,10 +444,20 @@ setPlayers([...ps]);
             const counts:Record<string,number>={}; for(const x of ps[i].hand) counts[x]=(counts[x]||0)+1;
             const angang = Object.entries(counts).find(([k,v])=>v===4)?.[0];
             if(angang){
-              applyConcealedGangAction(table, i, angang);
-              appendLogs([`➡️ ${ps[i].ai} 暗杠 ${tileLabel(angang)}（补摸一张）`]);
-              setTable({ ...table });
-              setWall([...w]);
+              const meldsCount = (table.players[i]?.melds||[]).length;
+              const includeHonors = (ruleMode!=='SCZDXZ');
+                const before = bestShanten(ps[i].hand, meldsCount, meldsCount, includeHonors);
+                const afterHand = handAfterRemove(ps[i].hand, [angang,angang,angang,angang]);
+                const after = bestShanten(afterHand, meldsCount+1, meldsCount+1, includeHonors);
+                const ukeAfter = ukeire(afterHand, table, includeHonors);
+              if(after <= before){
+                applyConcealedGangAction(table, i, angang as string);
+                appendLogs([`➡️ ${ps[i].ai} 暗杠 ${tileLabel(angang)}（补摸一张，shanten ${before}→${after}）`]);
+                setTable({ ...table });
+              } else {
+                appendLogs([`↩️ 放弃暗杠 ${tileLabel(angang)}（shanten ${before}→${after} 变差）`]);
+              }
+            }setWall([...w]);
 
             // 同步玩家可视状态（手牌/面子/弃牌）
             for(let si=0; si<table.players.length; si++){
@@ -261,19 +508,42 @@ setPlayers([...ps]);
                 appendLogs([`➡️ ${ps[gangSeat].ai} 明杠 ${tileLabel(out)}（补摸一张）`]);
               }else{
                 const pengSeat = resolved.find(r=>r.actions.includes('PENG'))?.seat;
-                if(typeof pengSeat==='number'){
-                  applyMeldAction(table, pengSeat, 'PENG', [out,out,out]);
-                  appendLogs([`➡️ ${ps[pengSeat].ai} 碰 ${tileLabel(out)}`]);
-                }else{
+              if(typeof pengSeat==='number'){
+                const actor = pengSeat;
+                const meldsCount = (table.players[actor]?.melds||[]).length;
+                const includeHonors = (ruleMode!=='SCZDXZ');
+                const before = bestShanten(ps[actor].hand, meldsCount, meldsCount, includeHonors);
+                const afterHand = handAfterRemove(ps[actor].hand, [out,out]);
+                const after = bestShanten(afterHand, meldsCount+1, meldsCount+1, includeHonors);
+                const ukeAfter = ukeire(afterHand, table, includeHonors);
+                if(after <= before){
+                  applyMeldAction(table, actor, 'PENG', [out,out,out]);
+                  appendLogs([`➡️ ${ps[actor].ai} 碰 ${tileLabel(out)}（shanten ${before}→${after}）`]);
+                } else {
+                  appendLogs([`↩️ 放弃碰 ${tileLabel(out)}（shanten ${before}→${after} 变差）`]);
+                }
+              }else{
                   const chiSeat = resolved.find(r=>r.actions.includes('CHI'))?.seat;
-                  if(typeof chiSeat==='number'){
-                    const seqs = possibleChiSeqs(ps[chiSeat].hand, out);
-                    const choose = seqs[0]||[];
-                    if(choose.length===3){
-                      applyMeldAction(table, chiSeat, 'CHI', choose);
-                      appendLogs([`➡️ ${ps[chiSeat].ai} 吃 ${choose.map(tileLabel).join('-')}`]);
-                    }
+                if(typeof chiSeat==='number'){
+                  const actor = chiSeat;
+                  const seqs = possibleChiSeqs(ps[actor].hand, out);
+                  let bestSeq:string[]|null = null; let bestDelta=999;
+                  const meldsCount = (table.players[actor]?.melds||[]).length;
+                  const before = shantenApprox(ps[actor].hand, meldsCount);
+                  for(const seq of seqs){
+                    const myTwo = seq.filter(x=>x!==out);
+                    const afterHand = handAfterRemove(ps[actor].hand, myTwo);
+                    const after = shantenApprox(afterHand, meldsCount+1);
+                    const delta = after - before;
+                    if(after <= before && delta < bestDelta){ bestDelta = delta; bestSeq = seq; }
                   }
+                  if(bestSeq){
+                    applyMeldAction(table, actor, 'CHI', bestSeq);
+                    appendLogs([`➡️ ${ps[actor].ai} 吃 ${bestSeq.map(tileLabel).join('-')}（shanten ${before}→${before+bestDelta}）`]);
+                  }else{
+                    appendLogs([`↩️ 放弃吃 ${tileLabel(out)}（吃后听牌形势不佳）`]);
+                  }
+                }
                 }
               }
             }
