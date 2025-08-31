@@ -22,6 +22,9 @@ export default function Home(){
   const [intervalMs, setIntervalMs] = useState(300);
   const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
   const [showHands, setShowHands] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const psRef = useRef<PlayerState[]|null>(null);
+  const wallRef = useRef<string[]|null>(null);
   const runningRef = useRef(false);
   type Keys = { kimi?: string; kimi2?: string; gemini?: string; grok?: string };
   const [keys, setKeys] = useState<Keys>({});
@@ -72,6 +75,8 @@ export default function Home(){
     setHandNo(0);
     setMatchActive(true);
     setHandRunning(false);
+    setPaused(false);
+    psRef.current = null; wallRef.current = null;
     if(rRef) rRef.current = false;
     runningRef.current = false;
   }
@@ -84,6 +89,7 @@ export default function Home(){
     const ps = players.map(p => ({ ...p, hand: w.splice(0,13), discards: [], melds: [], isWinner:false }));
     setPlayers(ps); setWall(w);
     setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
+    psRef.current = ps; wallRef.current = w; setPaused(false);
     appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮开始 ——`]);
     setHandRunning(true);
     runningRef.current = true;
@@ -107,6 +113,30 @@ export default function Home(){
     return { tile: hand[0], reason: 'fallback (no api)', meta:{ usedApi:false, provider:'local' } };
   }
     
+  
+  function togglePause(){
+    if(!handRunning) return;
+    if(!paused){
+      runningRef.current = false;
+      setPaused(true);
+      appendLogs(['⏸️ 已暂停']);
+    }else{
+      runningRef.current = true;
+      setPaused(false);
+      appendLogs(['▶️ 继续']);
+      if(psRef.current && wallRef.current){
+        void playOneHand(psRef.current, wallRef.current, runningRef);
+      }
+    }
+  }
+  function stopHand(){
+    if(!handRunning) return;
+    runningRef.current = false;
+    setPaused(false);
+    setHandRunning(false);
+    appendLogs(['⏹️ 已停止当前轮次']);
+  }
+
   async function playOneHand(ps:PlayerState[], w:string[], rRef: React.RefObject<boolean>){
     for(let turn=0; turn<2000; turn++){
       if(!rRef?.current){ appendLogs(['回合未开始或已停止']); return; }
@@ -242,12 +272,15 @@ setPlayers([...ps]);
           }
         }
 
+        psRef.current = ps; wallRef.current = w;
         setPlayers([...ps]);
         await new Promise(r=>setTimeout(r, intervalMs));
       }
     }
     appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮结束 ——`]);
     setHandRunning(false);
+    setPaused(false);
+    psRef.current = null; wallRef.current = null;
     if(rRef) rRef.current = false;
     runningRef.current = false;
     setHandNo(x=>x+1);
