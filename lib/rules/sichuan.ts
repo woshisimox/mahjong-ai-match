@@ -84,9 +84,10 @@ export function reactionsAfterDiscard(state:TableSnapshot):Reaction[]{
     const p = state.players[i];
     if(p.isWinner) continue;                          // winners no longer act in 血战
     const acts:ActionType[]=[];
-    // PENG
+    // PENG / GANG
     const cnt=countTiles(p.hand);
     if((cnt[tile]||0)>=2) acts.push('PENG');
+    if((cnt[tile]||0)>=3) acts.push('GANG');
     // CHI only for next player
     const next = (last.from+1)%4;
     if(i===next && isNumbered(tile)){
@@ -110,8 +111,10 @@ export function reactionsAfterDiscard(state:TableSnapshot):Reaction[]{
 export function resolveReactionsPriority(reactions:Reaction[]):Reaction[]{
   if(reactions.length===0) return [];
   const withHu = reactions.filter(r=>r.actions.includes('HU'));
-  if(withHu.length>0) return withHu; // 多家可胡 -> 全部返回，交由上层依次/同时结算
-  // 没人胡：看 PENG / CHI
+  if(withHu.length>0) return withHu; // 多家可胡 -> 全部返回
+  // 没人胡：先看 GANG，再看 PENG / CHI
+  const withGang = reactions.filter(r=>r.actions.includes('GANG'));
+  if(withGang.length>0) return withGang; // 多人明杠：按顺位优先
   const withPeng = reactions.filter(r=>r.actions.includes('PENG'));
   if(withPeng.length>0) return withPeng; // 若多人碰，按离放铳者顺位优先（由上层处理）
   const withChi = reactions.filter(r=>r.actions.includes('CHI'));
@@ -177,4 +180,32 @@ export function concealedOrAddGangOptions(hand:Tile[], melds = [] as {type:strin
   const hasBugang = pengs.some(x=> (cnt[x]||0)>=1 || drawn===x);
   if(hasBugang) acts.push('BUGANG');
   return acts;
+}
+
+
+/** 执行暗杠/补杠（在玩家回合内调用） */
+export function applyConcealedGang(state:TableSnapshot, actor:number, tile:Tile){
+  const p = state.players[actor];
+  // remove four tiles from hand
+  const need=[tile,tile,tile,tile];
+  if(!removeTilesFromHand(p.hand, need)) throw new Error('ANGANG: not enough tiles');
+  p.melds = p.melds || [];
+  p.melds.push({ type:'ANGANG', tiles:[tile,tile,tile,tile], from:null });
+  // 杠后补一张牌（简化：直接从同一墙摸）
+  const drawn = state.wall.shift();
+  if(drawn){ p.hand.push(drawn); }
+}
+
+export function applyAddGang(state:TableSnapshot, actor:number, tile:Tile){
+  const p = state.players[actor];
+  // find an existing PENG of tile
+  const pengIndex = (p.melds||[]).findIndex(m=>m.type==='PENG' && m.tiles[0]===tile);
+  if(pengIndex<0) throw new Error('BUGANG: no peng found');
+  // remove one from hand
+  if(!removeTilesFromHand(p.hand, [tile])) throw new Error('BUGANG: tile not in hand');
+  // upgrade meld
+  p.melds[pengIndex] = { type:'BUGANG', tiles:[tile,tile,tile,tile], from:p.melds[pengIndex].from };
+  // 补一张
+  const drawn = state.wall.shift();
+  if(drawn){ p.hand.push(drawn); }
 }

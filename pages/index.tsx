@@ -1,12 +1,27 @@
 import React, { useState } from 'react';
-import { generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState, initTable, type RuleMode } from '@/lib/mahjongEngine';
+import { generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState, initTable, type RuleMode, getReactionsAfterDiscard, priorityResolve, applyMeldAction, onDrawPhase, discardTile, markWinner, applyConcealedGangAction, applyAddGangAction } from '@/lib/mahjongEngine';
 
 export default function Home(){
+
+  // 计算可以吃的三张序列（包含目标牌）
+  function possibleChiSeqs(hand:string[], taken:string){
+    const s = taken[1]; const n = parseInt(taken[0],10);
+    const has=(x:string)=>hand.includes(x);
+    const seqs:string[][]=[];
+    if(s==='W'||s==='B'||s==='T'){
+      if(n>=3 && has(`${n-2}${s}`) && has(`${n-1}${s}`)) seqs.push([`${n-2}${s}`,`${n-1}${s}`,taken]);
+      if(n>=2 && n<=8 && has(`${n-1}${s}`) && has(`${n+1}${s}`)) seqs.push([`${n-1}${s}`,taken,`${n+1}${s}`]);
+      if(n<=7 && has(`${n+1}${s}`) && has(`${n+2}${s}`)) seqs.push([taken,`${n+1}${s}`,`${n+2}${s}`]);
+    }
+    return seqs;
+  }
+
   function tileClass(t:string){ const s=t[1]; if(s==='W') return 'tile w'; if(s==='B') return 'tile b'; if(s==='T') return 'tile t'; return 'tile z'; }
   function tileLabel(t:string){ const n=t[0]; const s=t[1]; if(s==='Z'){ const map:Record<string,string>={ '1':'東','2':'南','3':'西','4':'北','5':'中','6':'發','7':'白' }; return map[n]||t; } const mark = s==='W'?'万':(s==='B'?'饼':'条'); return `${n}${mark}`; }
   const Tile = ({t, small=false}:{t:string; small?:boolean})=>(<span className={tileClass(t)+(small?' small':'')} title={t}>{tileLabel(t)}</span>);
 
   const [players, setPlayers] = useState<PlayerState[]>([]);
+  const [table, setTable] = useState<any|null>(null);
   const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
   const [wall, setWall] = useState<string[]>([]);
   const [log, setLog] = useState<string[]>([]);
@@ -48,6 +63,8 @@ export default function Home(){
   setPlayers(ps);
   setWall(w);
   appendLogs(['新比赛开始（轮次清零，分数重置）']);
+  // 初始化用于规则处理的桌面快照（只在后续逐步接入时使用）
+  setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p, melds: [], isWinner:false })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
   setHandNo(0);
   setMatchActive(true);
   setHandRunning(false);
@@ -112,7 +129,53 @@ export default function Home(){
       appendLogs([apiLine, discardLine]);
       setPlayers([...ps]);
       await new Promise(r=>setTimeout(r, intervalMs));
-    }
+    
+      // === 吃/碰/杠/胡 裁决与执行（自动） ===
+      if(table){
+        // 同步 table 快照（浅同步）
+        table.players = ps.map(p=>({ ...p }));
+        table.wall = [...w];
+        table.lastDiscard = { tile: out, from: i };
+        table.turn = i;
+        // 询问反应
+        const reacts = getReactionsAfterDiscard(table);
+        const resolved = priorityResolve(reacts);
+        if(resolved && resolved.length>0){
+          // 胡优先（可多家）
+          const huSeats = resolved.filter(r=>r.actions.includes('HU')).map(r=>r.seat);
+          if(huSeats.length>0){
+            for(const s of huSeats){
+              markWinner(table, s);
+              appendLogs([`➡️ ${ps[s].ai} 荣和：吃炮 ${out}`]);
+            }
+          }else{
+            // 明杠 > 碰 > 吃
+            const gangSeat = resolved.find(r=>r.actions.includes('GANG'))?.seat;
+            if(typeof gangSeat==='number'){
+              applyMeldAction(table, gangSeat, 'GANG', [out,out,out,out]);
+              appendLogs([`➡️ ${ps[gangSeat].ai} 明杠 ${out}`]);
+            }else{
+              const pengSeat = resolved.find(r=>r.actions.includes('PENG'))?.seat;
+              if(typeof pengSeat==='number'){
+                applyMeldAction(table, pengSeat, 'PENG', [out,out,out]);
+                appendLogs([`➡️ ${ps[pengSeat].ai} 碰 ${out}`]);
+              }else{
+                const chiSeat = resolved.find(r=>r.actions.includes('CHI'))?.seat;
+                if(typeof chiSeat==='number'){
+                  const seqs = possibleChiSeqs(ps[chiSeat].hand, out);
+                  const choose = seqs[0]||[]; // 简单选第一种
+                  if(choose.length===3){
+                    applyMeldAction(table, chiSeat, 'CHI', choose);
+                    appendLogs([`➡️ ${ps[chiSeat].ai} 吃 ${choose.join('-')}`]);
+                  }
+                }
+              }
+            }
+          }
+        }
+        setTable({ ...table });
+      }
+}
 
     setHandNo(x=>{
       const done=x+1;

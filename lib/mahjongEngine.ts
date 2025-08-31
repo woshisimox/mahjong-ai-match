@@ -1,6 +1,6 @@
 
 import { Tile, Wall, PlayerState, TableSnapshot, Action, ActionType, Reaction, WinResult } from './types';
-import { reactionsAfterDiscard, resolveReactionsPriority, applyMeld, checkWin_SCZDXZ, concealedOrAddGangOptions } from './rules/sichuan';
+import { reactionsAfterDiscard, resolveReactionsPriority, applyMeld, checkWin_SCZDXZ, concealedOrAddGangOptions, applyConcealedGang, applyAddGang } from './rules/sichuan';
 
 /** -------- Tile set generators -------- */
 export const generateWallByRule = (includeHonors: boolean): Wall => {
@@ -137,4 +137,13 @@ export function checkWin(hand: Tile[]): { win: boolean; fan: string[]; score: nu
   const r = checkWin_SCZDXZ(hand);
   // 映射字段名到旧版
   return { win: r.win, fan: r.fans, score: r.scoreDelta };
+}
+
+
+/** 包装导出：在前端可直接执行暗杠/补杠 */
+export function applyConcealedGangAction(state:TableSnapshot, actor:number, tile:Tile){
+  return applyConcealedGang(state, actor, tile);
+}
+export function applyAddGangAction(state:TableSnapshot, actor:number, tile:Tile){
+  return applyAddGang(state, actor, tile);
 }
