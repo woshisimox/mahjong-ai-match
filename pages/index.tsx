@@ -446,9 +446,9 @@ setPlayers([...ps]);
             if(angang){
               const meldsCount = (table.players[i]?.melds||[]).length;
               const includeHonors = (ruleMode!=='SCZDXZ');
-                const before = bestShanten(ps[i].hand, meldsCount, meldsCount, includeHonors);
+                const before = bestShanten(ps[i].hand, meldsCount, includeHonors);
                 const afterHand = handAfterRemove(ps[i].hand, [angang,angang,angang,angang]);
-                const after = bestShanten(afterHand, meldsCount+1, meldsCount+1, includeHonors);
+                const after = bestShanten(afterHand, meldsCount+1, includeHonors);
                 const ukeAfter = ukeire(afterHand, table, includeHonors);
               if(after <= before){
                 applyConcealedGangAction(table, i, angang as string);
@@ -512,9 +512,9 @@ setPlayers([...ps]);
                 const actor = pengSeat;
                 const meldsCount = (table.players[actor]?.melds||[]).length;
                 const includeHonors = (ruleMode!=='SCZDXZ');
-                const before = bestShanten(ps[actor].hand, meldsCount, meldsCount, includeHonors);
+                const before = bestShanten(ps[actor].hand, meldsCount, includeHonors);
                 const afterHand = handAfterRemove(ps[actor].hand, [out,out]);
-                const after = bestShanten(afterHand, meldsCount+1, meldsCount+1, includeHonors);
+                const after = bestShanten(afterHand, meldsCount+1, includeHonors);
                 const ukeAfter = ukeire(afterHand, table, includeHonors);
                 if(after <= before){
                   applyMeldAction(table, actor, 'PENG', [out,out,out]);
