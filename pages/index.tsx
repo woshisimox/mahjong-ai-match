@@ -247,23 +247,26 @@ setPlayers([...ps]);
     setHandNo(x=>x+1);
   }
 
-  return (<div className="max-w">
-    <h1 style={{fontSize:22,fontWeight:700,marginBottom:12}}>Mahjong AI Match — 吃/碰/杠/胡（四川/传统 可切换）</h1>
+  
+  return (
+    <div className="max-w">
+      <h1 style={{fontSize:22,fontWeight:700,marginBottom:12}}>Mahjong AI Match — 吃/碰/杠/胡（四川/传统 可切换）</h1>
 
-    <div className="card">
-      <div className="flex items-center gap-3" style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-        <label className="small">规则：
-          <select value={ruleMode} onChange={e=>setRuleMode(e.target.value as RuleMode)}>
-            <option value="SCZDXZ">四川·血战到底（108）</option>
-            <option value="BASIC">传统（136）</option>
-          </select>
-        </label>
-        <label className="small">最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
-        <label className="small">步进(ms)：<input className="w-24" value={intervalMs} onChange={e=>setIntervalMs(Math.max(0,parseInt(e.target.value||'0',10)||0))} /></label>
-        <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
-        <button onClick={startNewMatch}>开始新比赛</button>
-        <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
-      
+      <div className="card">
+        <div className="flex items-center gap-3" style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+          <label className="small">规则：
+            <select value={ruleMode} onChange={e=>setRuleMode(e.target.value as RuleMode)}>
+              <option value="SCZDXZ">四川·血战到底（108）</option>
+              <option value="BASIC">传统（136）</option>
+            </select>
+          </label>
+          <label className="small">最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
+          <label className="small">步进(ms)：<input className="w-24" value={intervalMs} onChange={e=>setIntervalMs(Math.max(0,parseInt(e.target.value||'0',10)||0))} /></label>
+          <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
+          <button onClick={startNewMatch}>开始新比赛</button>
+          <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
+        </div>
+
         <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
           <div>
             <div className="small mb-1">Kimi（Moonshot）API Key</div>
@@ -282,44 +285,30 @@ setPlayers([...ps]);
             <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
           </div>
         </div>
-    
-    </div>
+      </div>
 
-    <div className="card">
-      <div className="flex" style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:16}}>
-        {players.map((p, i) => (<div key={p.ai} className="mb-2">
-          <div className="font-semibold">{p.ai}　<span className="text-xs" style={{opacity:.8}}>分：{p.score||0}</span></div>
-          {showHands && (<>
-            <div className="text-xs" style={{opacity:.95, marginTop:4}}>手：</div>
-            <div className="tiles tiles-wrap-14">{sortTiles(p.hand||[]).map((x,j)=>(<Tile key={x+':h:'+j} t={x}/>))}</div>
-          </>)}
-          <div className="text-xs" style={{opacity:.85, marginTop:4}}>面子（吃/碰/杠）：</div>
-          <div className="tiles">{(p.melds||[]).map((m:any,mi:number)=>(<span key={"meld:"+mi} className="meld-group">{(m.tiles||[]).map((x:string,xi:number)=>(<Tile key={x+":m:"+xi} t={x} small/>))}</span>))}</div>
-          <div className="text-xs" style={{opacity:.85, marginTop:4}}>弃（顺序）：</div>
-          <div className="tiles">{(p.discards||[]).map((x,j)=>(<Tile key={x+':d:'+j} t={x} small/>))}</div>
-        </div>))}
-      
-        <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
-          <div>
-            <div className="small mb-1">Kimi（Moonshot）API Key</div>
-            <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
-          </div>
-          <div>
-            <div className="small mb-1">Kimi（Moonshot 备用）</div>
-            <input className="w-full" placeholder="moonshot-..." value={keys.kimi||''} onChange={e=>setKeys({...keys, kimi:e.target.value})} />
-          </div>
-          <div>
-            <div className="small mb-1">Gemini API Key</div>
-            <input className="w-full" placeholder="AIza..." value={keys.gemini||''} onChange={e=>setKeys({...keys, gemini:e.target.value})} />
-          </div>
-          <div>
-            <div className="small mb-1">Grok API Key</div>
-            <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
-          </div>
+      <div className="card">
+        <div className="flex" style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:16}}>
+          {players.map((p, i) => (
+            <div key={p.ai} className="mb-2">
+              <div className="font-semibold">{p.ai}　<span className="text-xs" style={{opacity:.8}}>分：{p.score||0}</span></div>
+              {showHands && (<>
+                <div className="text-xs" style={{opacity:.95, marginTop:4}}>手：</div>
+                <div className="tiles tiles-wrap-14">{sortTiles(p.hand||[]).map((x,j)=>(<Tile key={x+':h:'+j} t={x}/>))}</div>
+              </>)}
+              <div className="text-xs" style={{opacity:.85, marginTop:4}}>面子（吃/碰/杠）：</div>
+              <div className="tiles">{(p.melds||[]).map((m:any,mi:number)=>(<span key={"meld:"+mi} className="meld-group">{(m.tiles||[]).map((x:string,xi:number)=>(<Tile key={x+":m:"+xi} t={x} small/>))}</span>))}</div>
+              <div className="text-xs" style={{opacity:.85, marginTop:4}}>弃（顺序）：</div>
+              <div className="tiles">{(p.discards||[]).map((x,j)=>(<Tile key={x+':d:'+j} t={x} small/>))}</div>
+            </div>
+          ))}
         </div>
-    
-    </div>
+      </div>
 
-    <div className="card"><div className="font-semibold mb-2">日志</div><div className="log-sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\n')}</div></div>
-  </div>);
+      <div className="card">
+        <div className="font-semibold mb-2">日志</div>
+        <div className="log-sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\\n')}</div>
+      </div>
+    </div>
+  );
 }
