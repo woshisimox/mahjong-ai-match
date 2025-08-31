@@ -86,7 +86,7 @@ export function applyMeldAction(state:TableSnapshot, actor:number, kind:'CHI'|'P
 }
 
 /** 胡牌判断（用于荣和；自摸在摸牌后判断） */
-export function checkWin(state:TableSnapshot, seat:number, fromDiscard:boolean, last?:Tile):WinResult{
+export function checkWinState(state:TableSnapshot, seat:number, fromDiscard:boolean, last?:Tile):WinResult{
   const p = state.players[seat];
   const r = checkWin_SCZDXZ(p.hand, fromDiscard ? last : undefined);
   return r;
@@ -131,3 +131,10 @@ export function markWinner(state:TableSnapshot, seat:number){
 
 /** 简单导出：供页面使用的类型 */
 export type { PlayerState } from './types';
+
+/** 兼容旧接口：只传 hand（用于自摸判定），返回 {win, fan(s), score} */
+export function checkWin(hand: Tile[]): { win: boolean; fan: string[]; score: number } {
+  const r = checkWin_SCZDXZ(hand);
+  // 映射字段名到旧版
+  return { win: r.win, fan: r.fans, score: r.scoreDelta };
+}
