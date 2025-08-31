@@ -1,0 +1,381 @@
+import React, { useState } from 'react';
+import {
+  generateWall, dealHands, drawTile,
+  checkWin, scoreWin,
+  canPon, pickChi, canMinkan, findAnkanTile, findKakanTile,
+  type PlayerState, type Tile, type Meld
+} from '@/lib/mahjongEngine';
+
+export default function Home(){
+  function tileClass(t:string){ const s=t[1]; if(s==='W') return 'tile w'; if(s==='B') return 'tile b'; if(s==='T') return 'tile t'; return 'tile z'; }
+  function tileLabel(t:string){ const n=t[0]; const s=t[1]; if(s==='Z'){ const map:any={1:'东',2:'南',3:'西',4:'北',5:'中',6:'发',7:'白'}; return map[parseInt(n)]; } const mark = s==='W'?'万':(s==='B'?'饼':'条'); return `${n}${mark}`; }
+  const TileV = ({t, small=false}:{t:string; small?:boolean})=>(<span className={tileClass(t)+(small?' small':'')} title={t}>{tileLabel(t)}</span>);
+
+  const [players, setPlayers] = useState<PlayerState[]>([]);
+  const [wall, setWall] = useState<string[]>([]);
+  const [log, setLog] = useState<string[]>([]);
+  const [maxHands, setMaxHands] = useState(12);
+  const [handNo, setHandNo] = useState(0);
+  const [matchActive, setMatchActive] = useState(false);
+  const [handRunning, setHandRunning] = useState(false);
+  const [intervalMs, setIntervalMs] = useState(500);
+  const [showHands, setShowHands] = useState(true);
+
+  const [keys, setKeys] = useState<{kimi2?:string; kimi?:string; gemini?:string; grok?:string}>({});
+
+  function appendLogs(lines: string[]){ setLog(prev => [...prev, ...lines]); }
+  function sortTiles(ts: string[]){
+    return [...ts].sort((a,b)=>{
+      if(a[1]!==b[1]) return a[1].localeCompare(b[1]);
+      return parseInt(a[0]) - parseInt(b[0]);
+    });
+  }
+
+  function settlementTsumo(ps: PlayerState[], who: number, wr: {yaku:string[]; fan:number}){
+    const base = wr.fan;
+    const deltas = ps.map((_,i)=> i===who ? +base*3 : -base);
+    appendLogs([`结算：${ps[who].ai} 自摸（${wr.yaku.join('+')}，共${base}番）`,
+      ...ps.map((p,i)=>`  ${p.ai}：${deltas[i]>0?'+':''}${deltas[i]}`)
+    ]);
+    return ps.map((p,i)=>({...p, score: p.score + deltas[i]}));
+  }
+  function settlementRon(ps: PlayerState[], winner: number, loser: number, wr: {yaku:string[]; fan:number}){
+    const base = wr.fan;
+    const deltas = ps.map((_,i)=> i===winner ? +base : (i===loser ? -base : 0));
+    appendLogs([`结算：${ps[winner].ai} 荣和（${ps[loser].ai} 放铳；${wr.yaku.join('+')}，共${base}番）`,
+      ...ps.map((p,i)=>`  ${p.ai}：${deltas[i]>0?'+':''}${deltas[i]}`)
+    ]);
+    return ps.map((p,i)=>({...p, score: p.score + deltas[i]}));
+  }
+
+  function buildSnapshot(curIdx:number){
+    const self = players[curIdx] as (PlayerState | undefined);
+    const opps = players.map((p,idx)=>({ ai:p.ai, count:p.hand.length, discards:p.discards.slice(-6), idx })).filter((_,idx)=>idx!==curIdx);
+    return {
+      you:{ ai: (self?.ai||''), count: (self?.hand?.length||0), melds: (self?.melds||[]) },
+      opponents: opps,
+      table:{ wallCount: wall.length, handNo, maxHands },
+      discardsAll: players.map(p=>({ ai:p.ai, discards:p.discards }))
+    };
+  }
+
+  async function playOneHand(psInit: PlayerState[], wallInit: string[]){
+    let ps = psInit.map(p=>({...p, hand: sortTiles(p.hand)}));
+    let w = wallInit;
+    // 预留4张作“岭上牌”（死墙替代，简化）
+    let rinshan: string[] = w.splice(-4);
+    let cur = 0; // 轮到谁
+    let steps = 0;
+    let afterKanDraw = false; // 当前轮到的人是否应岭上摸牌
+
+    while(true){
+      steps++; if(steps>800){ appendLogs(['达到步数上限，流局']); break; }
+
+      // 摸牌（普通或岭上）
+      let t: string | null = null;
+      let wasRinshan = false;
+      if(afterKanDraw){
+        if(rinshan.length){ t = rinshan.shift()!; wasRinshan = true; }
+        else { t = w.length ? w.pop()! : null; }
+        afterKanDraw = false;
+      }else{
+        t = drawTile(w);
+      }
+      if(!t){ appendLogs(['墙牌用尽，流局']); break; }
+      ps[cur].hand.push(t);
+      ps[cur].hand = sortTiles(ps[cur].hand);
+
+      // --- 抢杠检查（针对加杠）：如果此时立刻宣布加杠，会被抢？我们用“先判加杠抢杠”逻辑 ---
+      // 1) 优先尝试“加杠”
+      const kakan = findKakanTile(ps[cur].hand, ps[cur].melds);
+      if(kakan){
+        const tile = kakan.tile;
+        // 其他家能否对该牌荣和（抢杠）？
+        let robbed = false;
+        for(let r=1;r<ps.length;r++){
+          const j=(cur+r)%ps.length;
+          const canRon = checkWin([...ps[j].hand, tile]);
+          if(canRon){
+            // 抢杠荣和
+            const wr = scoreWin([...ps[j].hand, tile], { robKong:true, tsumo:false });
+            // 从碰面子升级失败（不加杠了），直接结算
+            appendLogs([`${ps[j].ai} 抢杠和 ${tileLabel(tile)}（抢 ${ps[cur].ai} 的加杠）`]);
+            ps = settlementRon(ps, j, cur, wr);
+            setPlayers(ps); robbed = true; break;
+          }
+        }
+        if(robbed){ break; }
+        // 没有人抢杠，则执行加杠
+        ps[cur].hand.splice(ps[cur].hand.indexOf(tile),1);
+        ps[cur].melds[kakan.meldIndex] = { type:'kan', kanType:'kakan', tiles:[tile,tile,tile,tile], from: cur };
+        appendLogs([`${ps[cur].ai} 加杠 ${tileLabel(tile)}`]);
+        setPlayers([...ps]);
+        // 加杠后岭上摸
+        afterKanDraw = true;
+        await new Promise(r=>setTimeout(r, intervalMs));
+        continue; // 进入下一轮（岭上摸）
+      }
+
+      // 2) 尝试“暗杠”（有4张同牌，在打牌前处理；每轮最多一次）
+      const ankan = findAnkanTile(ps[cur].hand);
+      if(ankan){
+        // 从手移除4张
+        let removed=0;
+        ps[cur].hand = ps[cur].hand.filter(x=>{
+          if(x===ankan && removed<4){ removed++; return false; }
+          return true;
+        });
+        ps[cur].melds.push({ type:'kan', kanType:'ankan', tiles:[ankan,ankan,ankan,ankan], from: cur });
+        appendLogs([`${ps[cur].ai} 暗杠 ${tileLabel(ankan)}`]);
+        setPlayers([...ps]);
+        afterKanDraw = true;
+        await new Promise(r=>setTimeout(r, intervalMs));
+        continue; // 岭上摸
+      }
+
+      // 自摸判定（岭上摸后自摸将包含岭上开花番）
+      const rSelf = scoreWin(ps[cur].hand, { tsumo:true, rinshan: wasRinshan });
+      if(rSelf.win){
+        const wr = rSelf;
+        appendLogs([`${ps[cur].ai} 自摸：${wr.yaku.join('+')} = ${wr.fan}`]);
+        ps = settlementTsumo(ps, cur, wr);
+        setPlayers(ps); break;
+      }
+
+      // 选择出牌
+      let out: string | null = null;
+      let reasonText = 'local';
+      let apiMeta: any = null;
+      try{
+        const resp = await fetch(`/api/aiPlay?ai=${ps[cur].ai}`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ hand: ps[cur].hand, keys, snapshot: buildSnapshot(cur) })
+        }).then(r=>r.json());
+        if(resp?.tile && ps[cur].hand.includes(resp.tile)){ out=resp.tile; reasonText = resp?.reason || reasonText; }
+        apiMeta = resp?.meta || null;
+      }catch{}
+      if(!out){ out=ps[cur].hand[0]; reasonText='fallback'; }
+
+      // 执行打出
+      const idx = ps[cur].hand.indexOf(out);
+      ps[cur].hand.splice(idx,1);
+      ps[cur].discards.push(out);
+      const apiLine = apiMeta ? `[API] ${ps[cur].ai} ${apiMeta.usedApi ? `使用 ${apiMeta.provider}` : '未使用外部API'} ${apiMeta?.detail ? '- ' + apiMeta.detail : ''}` : `[API] ${ps[cur].ai} 未调用外部API（无响应），使用本地策略`;
+      const discardLine = `${ps[cur].ai} 打出 ${tileLabel(out)}（理由：${reasonText}）`;
+      appendLogs([apiLine, discardLine]);
+      setPlayers([...ps]);
+      await new Promise(r=>setTimeout(r, intervalMs));
+
+      // 荣和优先
+      {
+        let done = false;
+        for(let k=1;k<ps.length;k++){
+          const j=(cur+k)%ps.length;
+          if(checkWin([...ps[j].hand, out as string])){
+            // 计算严格番种（非岭上，非抢杠，荣和）
+            const wr = scoreWin([...ps[j].hand, out as string], { tsumo:false });
+            // 从弃牌区移除
+            const lastIdx = ps[cur].discards.lastIndexOf(out as string);
+            if(lastIdx >= 0) ps[cur].discards.splice(lastIdx,1);
+            appendLogs([`${ps[j].ai} 荣和 ${tileLabel(out!)}（${ps[cur].ai} 放铳）`]);
+            ps = settlementRon(ps, j, cur, wr);
+            setPlayers(ps); done = true; break;
+          }
+        }
+        if(done) break;
+      }
+
+      // 明杠（来自弃牌）：优先于碰/吃
+      {
+        let claimed = false;
+        for(let k=1;k<ps.length;k++){
+          const j=(cur+k)%ps.length;
+          if(canMinkan(ps[j].hand, out!)){
+            // 执行明杠
+            let removed=0;
+            ps[j].hand = ps[j].hand.filter(t=>{
+              if(t===out && removed<3){ removed++; return false; }
+              return true;
+            });
+            ps[j].melds.push({ type:'kan', kanType:'minkan', tiles:[out!,out!,out!,out!], from: cur });
+            // 从弃牌区移除
+            const lastIdx = ps[cur].discards.lastIndexOf(out as string);
+            if(lastIdx >= 0) ps[cur].discards.splice(lastIdx,1);
+            appendLogs([`${ps[j].ai} 明杠！（取 ${ps[cur].ai} 的 ${tileLabel(out!)}）`]);
+            setPlayers([...ps]);
+            // 明杠后由 j 岭上摸
+            cur = j;
+            afterKanDraw = true;
+            await new Promise(r=>setTimeout(r, intervalMs));
+            claimed = true;
+            break;
+          }
+        }
+        if(claimed) continue;
+      }
+
+      // 碰（优先于吃）
+      {
+        let claimed = false;
+        for(let k=1;k<ps.length;k++){
+          const j=(cur+k)%ps.length;
+          if(canPon(ps[j].hand, out!)){
+            // 从 j 手牌移除两张 out，组成碰面子
+            let removed = 0;
+            ps[j].hand = ps[j].hand.filter(t=>{
+              if(t===out && removed<2){ removed++; return false; }
+              return true;
+            });
+            const meld: Meld = { type:'pon', tiles:[out!, out!, out!], from: cur };
+            ps[j].melds.push(meld);
+            // 从弃牌区移除被拿走的那张
+            const lastIdx = ps[cur].discards.lastIndexOf(out as string);
+            if(lastIdx >= 0) ps[cur].discards.splice(lastIdx,1);
+            appendLogs([`${ps[j].ai} 碰！（取 ${ps[cur].ai} 的 ${tileLabel(out!)}）`]);
+            setPlayers([...ps]);
+            // 碰后由 j 出牌（不摸牌）
+            cur = j;
+            claimed = true;
+            break;
+          }
+        }
+        if(claimed) continue;
+      }
+
+      // 吃（仅下家）
+      const next = (cur+1)%ps.length;
+      const chiPick = pickChi(ps[next].hand, out!);
+      if(chiPick){
+        // 从下家手里移除吃用的两张
+        for(const need of chiPick){
+          const k = ps[next].hand.indexOf(need);
+          if(k>=0) ps[next].hand.splice(k,1);
+        }
+        const seq = [ ...chiPick, out! ].sort((a,b)=>{
+          if(a[1]!==b[1]) return a[1].localeCompare(b[1]);
+          return parseInt(a[0]) - parseInt(b[0]);
+        });
+        ps[next].melds.push({ type:'chi', tiles: seq, from: cur });
+        // 从弃牌区移除被拿走的那张
+        const lastIdx = ps[cur].discards.lastIndexOf(out as string);
+        if(lastIdx >= 0) ps[cur].discards.splice(lastIdx,1);
+        appendLogs([`${ps[next].ai} 吃！（取 ${ps[cur].ai} 的 ${tileLabel(out!)} → ${seq.map(tileLabel).join('')}）`]);
+        setPlayers([...ps]);
+        // 吃后由下家出牌（不摸牌）
+        cur = next;
+        continue;
+      }
+
+      // 无人叫牌，轮到下家
+      cur = (cur+1)%ps.length;
+    }
+  }
+
+  async function startMatch(){
+    setMatchActive(true); setLog([]); setHandNo(0);
+    let ps = dealHands(generateWall(), ['Seat-A','Seat-B','Seat-C','Seat-D']);
+    setPlayers(ps); setWall([]);
+    for(let h=0; h<maxHands; h++){
+      setHandRunning(true);
+      let wall = generateWall();
+      ps = dealHands(wall, ps.map(p=>p.ai)); // 重新发牌，沿用AI标识
+      setPlayers(ps); setWall(wall);
+      appendLogs([`—— 第 ${h+1} 局开始 ——`]);
+      await playOneHand(ps, wall);
+      setHandRunning(false);
+      setHandNo(h+1);
+      await new Promise(r=>setTimeout(r, 400));
+    }
+    setMatchActive(false);
+  }
+
+  return (<div className="wrap">
+    <div className="card">
+      <div className="row">
+        <button className="btn" disabled={matchActive||handRunning} onClick={startMatch}>开始对战</button>
+        <label className="small">轮数
+          <input type="number" min={1} max={99} value={maxHands} onChange={e=>setMaxHands(parseInt(e.target.value||'1'))} style={{width:70}} /></label>
+        <label className="small">速度(ms)
+          <input type="number" min={0} max={3000} value={intervalMs} onChange={e=>setIntervalMs(parseInt(e.target.value||'0'))} style={{width:90}} /></label>
+        <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
+      </div>
+    </div>
+
+    <div className="card">
+      <div className="font-semibold mb-2">AI Key 设置（仅本次会话内使用）</div>
+      <div className="grid" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12}}>
+        <label className="small">Kimi Key 2
+          <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
+        </label>
+        <label className="small">Kimi (Moonshot) Key
+          <input className="w-full" placeholder="moonshot-..." value={keys.kimi||''} onChange={e=>setKeys({...keys, kimi:e.target.value})} />
+        </label>
+        <label className="small">Gemini Key
+          <input className="w-full" placeholder="AIza..." value={keys.gemini||''} onChange={e=>setKeys({...keys, gemini:e.target.value})} />
+        </label>
+        <label className="small">Grok (xAI) Key
+          <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
+        </label>
+      </div>
+      <div className="text-xs" style={{opacity:.7, marginTop:6}}>未填写时，将使用本地启发式出牌（不会请求外部接口）。</div>
+    </div>
+
+    <div className="card">
+      <div className="small" style={{opacity:.9}}>墙余：{wall.length}</div>
+      <div className="mt-2">
+        {players.map((p,pi) => (<div key={p.ai} className="mb-3">
+          <div className="font-semibold">{p.ai}　<span className="text-xs" style={{opacity:.8}}>分：{p.score||0}</span></div>
+          {showHands && (<>
+            <div className="text-xs" style={{opacity:.95, marginTop:4}}>手：</div>
+            <div className="tiles tiles-wrap-14">{(p.hand||[]).map((x,i)=>(<TileV key={x+':h:'+i} t={x}/>))}</div>
+          </>)}
+          <div className="text-xs" style={{opacity:.85, marginTop:4}}>副露：</div>
+          <div className="melds">
+            {(p.melds||[]).map((m,i)=>(
+              <div key={'m:'+i} className={'meld ' + m.type + (m.kanType?(' '+m.kanType):'')}>
+                {m.tiles.map((x,xi)=>(<TileV key={'m:'+i+':t:'+xi} t={x} small/>))}
+                <span className="ml-1 text-xxs" style={{opacity:.7}}>
+                  {m.type==='kan' ? (m.kanType==='ankan'?'暗杠':m.kanType==='minkan'?'明杠':'加杠') : (m.type==='pon'?'碰':'吃')}
+                  {' '}来自 {players[m.from]?.ai}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="text-xs" style={{opacity:.85, marginTop:4}}>弃（顺序）：</div>
+          <div className="tiles">{(p.discards||[]).map((x,i)=>(<TileV key={x+':d:'+i} t={x} small/>))}</div>
+        </div>))}
+      </div>
+    </div>
+
+    <div className="card"><div className="font-semibold mb-2">日志</div>
+      <div className="log sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\n')}</div>
+    </div>
+
+    <style jsx>{`
+      .wrap{ max-width:980px; margin:24px auto; padding:12px; }
+      .card{ background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:12px; padding:12px 14px; margin-bottom:12px; }
+      .row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+      .btn{ background:#111; color:#fff; padding:8px 12px; border-radius:8px; }
+      .small{ font-size:12px; display:flex; align-items:center; gap:8px; }
+      .grid .small{ display:flex; flex-direction:column; align-items:flex-start; }
+      input{ border:1px solid #ddd; border-radius:8px; padding:6px 8px; }
+      .tiles{ display:flex; gap:6px; flex-wrap:wrap; }
+      .tiles-wrap-14 .tile{ width:28px; }
+      .tile{ display:inline-flex; width:32px; height:44px; border:1px solid #ddd; border-radius:6px; align-items:center; justify-content:center; font-weight:600; }
+      .tile.small{ width:24px; height:34px; font-weight:500; }
+      .tile.w{ background:#fff; }
+      .tile.b{ background:#fff; }
+      .tile.t{ background:#fff; }
+      .tile.z{ background:#fff; }
+      .melds{ display:flex; gap:10px; flex-wrap:wrap; }
+      .meld{ display:inline-flex; align-items:center; padding:3px 5px; border-radius:6px; border:1px dashed #ddd; }
+      .meld.chi{ background:rgba(46,204,113,.08); }
+      .meld.pon{ background:rgba(52,152,219,.08); }
+      .meld.ankan{ background:rgba(149,165,166,.12); }
+      .meld.minkan{ background:rgba(241,196,15,.15); }
+      .meld.kakan{ background:rgba(230,126,34,.15); }
+      .text-xxs{ font-size:11px; }
+      .log{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; max-height:260px; overflow:auto; background:#fafafa; border:1px solid #eee; border-radius:8px; padding:8px; }
+    `}</style>
+  </div>);
+}
