@@ -22,6 +22,8 @@ export default function Home(){
   const [intervalMs, setIntervalMs] = useState(300);
   const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
   const [showHands, setShowHands] = useState(true);
+  const [startScore, setStartScore] = useState(1000);
+  const [seatProvider, setSeatProvider] = useState<{E:string;S:string;W:string;N:string}>({E:'local',S:'local',W:'local',N:'local'});
   const [paused, setPaused] = useState(false);
   const psRef = useRef<PlayerState[]|null>(null);
   const wallRef = useRef<string[]|null>(null);
@@ -67,7 +69,9 @@ export default function Home(){
   function startNewMatch() {
     setLog([]);
     const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
-    const ps = dealHands(w, ['kimi','kimi2','gemini','grok']);
+    const ps = dealHands(w, ['东','南','西','北']);
+    // 统一起始分
+    for(const p of ps){ (p as any).score = startScore; }
     setPlayers(ps);
     setWall(w);
     setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p, melds: [], isWinner:false })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
@@ -97,9 +101,9 @@ export default function Home(){
   }
 
 
-  async function askAI(ai:string, hand:string[], snapshot:any){
+  async function askAI(provider:string, hand:string[], snapshot:any){
     try{
-      const resp = await fetch(`/api/aiPlay?ai=${encodeURIComponent(ai)}`, {
+      const resp = await fetch(`/api/aiPlay?provider=${encodeURIComponent(provider)}`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ hand, keys, snapshot })
@@ -149,7 +153,7 @@ export default function Home(){
         // 1) 摸牌
         const t = w.shift()!;
         ps[i].hand.push(t);
-        appendLogs([`🀄 ${ps[i].ai} 摸牌 ${tileLabel(t)}`]);
+        setWall([...w]);
 
         // 1.1) 自摸
         const r = checkWin(ps[i].hand);
@@ -182,7 +186,9 @@ setPlayers([...ps]);
           if(hasPeng){
             applyAddGangAction(table, i, t);
             appendLogs([`➡️ ${ps[i].ai} 补杠 ${tileLabel(t)}（补摸一张）`]);
+            if(table){ table.wall = [...w]; }
             setTable({ ...table });
+            setWall([...w]);
 
             // 同步玩家可视状态（手牌/面子/弃牌）
             for(let si=0; si<table.players.length; si++){
@@ -204,6 +210,7 @@ setPlayers([...ps]);
               applyConcealedGangAction(table, i, angang);
               appendLogs([`➡️ ${ps[i].ai} 暗杠 ${tileLabel(angang)}（补摸一张）`]);
               setTable({ ...table });
+              setWall([...w]);
 
             // 同步玩家可视状态（手牌/面子/弃牌）
             for(let si=0; si<table.players.length; si++){
@@ -222,7 +229,9 @@ setPlayers([...ps]);
 
         // 2) 出牌（调用 /api/aiPlay 决策 + 本地兜底）
         const snapshot:any = table ? { players: table.players, discards: table.discards } : {};
-        const decide = await askAI(ps[i].ai, [...ps[i].hand], snapshot);
+        const seatKeys = ['E','S','W','N'] as const; const seatKey = seatKeys[i] || 'E';
+        const provider = (seatProvider as any)[seatKey] || 'local';
+        const decide = await askAI(provider, [...ps[i].hand], snapshot);
         const out = (decide && decide.tile && ps[i].hand.includes(decide.tile)) ? decide.tile : ps[i].hand[0];
         const reasonText = decide?.reason || 'local';
         // 执行弃牌
@@ -302,15 +311,60 @@ setPlayers([...ps]);
           </label>
           <label className="small">最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
           <label className="small">步进(ms)：<input className="w-24" value={intervalMs} onChange={e=>setIntervalMs(Math.max(0,parseInt(e.target.value||'0',10)||0))} /></label>
+          <label className="small">起始分：<input className="w-24" value={startScore} onChange={e=>setStartScore(Math.max(0,parseInt(e.target.value||"0",10)||0))} /></label>
+
           <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
           <button onClick={startNewMatch}>开始新比赛</button>
           <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
-          <span className="small" style={{marginLeft:8}}>余牌：{(table?.wall?.length ?? wall.length)}</span>
+          <span className="small" style={{marginLeft:8}}>余牌：{wall.length}</span>
         </div>
 
         <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
           <div>
-            <div className="small mb-1">Kimi（Moonshot）API Key</div>
+            
+        <div style={{marginTop:8}}>
+          <div className="small mb-1">座位与AI：</div>
+          <div style={{display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:8}}>
+            <label className="small">东：
+              <select value={seatProvider.E} onChange={e=>setSeatProvider({...seatProvider, E:e.target.value})}>
+                <option value="local">内置(Local)</option>
+                <option value="kimi2">Kimi</option>
+                <option value="kimi">Kimi(备用)</option>
+                <option value="gemini">Gemini</option>
+                <option value="grok">Grok</option>
+              </select>
+            </label>
+            <label className="small">南：
+              <select value={seatProvider.S} onChange={e=>setSeatProvider({...seatProvider, S:e.target.value})}>
+                <option value="local">内置(Local)</option>
+                <option value="kimi2">Kimi</option>
+                <option value="kimi">Kimi(备用)</option>
+                <option value="gemini">Gemini</option>
+                <option value="grok">Grok</option>
+              </select>
+            </label>
+            <label className="small">西：
+              <select value={seatProvider.W} onChange={e=>setSeatProvider({...seatProvider, W:e.target.value})}>
+                <option value="local">内置(Local)</option>
+                <option value="kimi2">Kimi</option>
+                <option value="kimi">Kimi(备用)</option>
+                <option value="gemini">Gemini</option>
+                <option value="grok">Grok</option>
+              </select>
+            </label>
+            <label className="small">北：
+              <select value={seatProvider.N} onChange={e=>setSeatProvider({...seatProvider, N:e.target.value})}>
+                <option value="local">内置(Local)</option>
+                <option value="kimi2">Kimi</option>
+                <option value="kimi">Kimi(备用)</option>
+                <option value="gemini">Gemini</option>
+                <option value="grok">Grok</option>
+              </select>
+            </label>
+          </div>
+        </div>
+    
+          <div className="small mb-1">Kimi（Moonshot）API Key</div>
             <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
           </div>
           <div>
