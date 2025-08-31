@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { generateWall, dealHands, drawTile, checkWin, type PlayerState } from '@/lib/mahjongEngine';
+import { generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState, initTable, type RuleMode } from '@/lib/mahjongEngine';
 
 export default function Home(){
   function tileClass(t:string){ const s=t[1]; if(s==='W') return 'tile w'; if(s==='B') return 'tile b'; if(s==='T') return 'tile t'; return 'tile z'; }
@@ -7,6 +7,7 @@ export default function Home(){
   const Tile = ({t, small=false}:{t:string; small?:boolean})=>(<span className={tileClass(t)+(small?' small':'')} title={t}>{tileLabel(t)}</span>);
 
   const [players, setPlayers] = useState<PlayerState[]>([]);
+  const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
   const [wall, setWall] = useState<string[]>([]);
   const [log, setLog] = useState<string[]>([]);
   const [maxHands, setMaxHands] = useState(16);
@@ -128,7 +129,10 @@ export default function Home(){
 
     <div className="card">
       <div className="flex items-center gap-3" style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-        <label className="small">最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
+        <label className="small">规则：<select value={ruleMode} onChange={e=>setRuleMode(e.target.value as RuleMode)}>
+              <option value='SCZDXZ'>四川·血战到底（108）</option>
+              <option value='BASIC'>传统（136）</option>
+            </select>　最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
         <label className="small">
   出牌间隔(ms)：
   <input
