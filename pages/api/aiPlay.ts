@@ -195,7 +195,6 @@ const local=()=>{
       bestSh = sh; bestUke = uke; bestKeep = keep; drop = x;
     }
   }
-}
 
   // human-readable reason
 function reasonForLocal(x:string, hand:string[], snapshot:any){
