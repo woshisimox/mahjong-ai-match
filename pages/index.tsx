@@ -1,7 +1,37 @@
+
 import React, { useState } from 'react';
-import { generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState, initTable, type RuleMode, getReactionsAfterDiscard, priorityResolve, applyMeldAction, onDrawPhase, discardTile, markWinner, applyConcealedGangAction, applyAddGangAction } from '@/lib/mahjongEngine';
+import {
+  generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState,
+  type RuleMode, getReactionsAfterDiscard, priorityResolve, applyMeldAction, onDrawPhase,
+  discardTile, markWinner, applyConcealedGangAction, applyAddGangAction
+} from '@/lib/mahjongEngine';
 
 export default function Home(){
+  function tileClass(t:string){ const s=t[1]; if(s==='W') return 'tile w'; if(s==='B') return 'tile b'; if(s==='T') return 'tile t'; return 'tile z'; }
+  function tileLabel(t:string){ const n=t[0]; const s=t[1]; const mark = s==='W'?'万':(s==='B'?'饼':(s==='T'?'条':'字')); return `${n}${mark}`; }
+  const Tile = ({t, small=false}:{t:string; small?:boolean})=>(<span className={tileClass(t)+(small?' small':'')} title={t}>{tileLabel(t)}</span>);
+
+  const [players, setPlayers] = useState<PlayerState[]>([]);
+  const [table, setTable] = useState<any|null>(null);
+  const [wall, setWall] = useState<string[]>([]);
+  const [log, setLog] = useState<string[]>([]);
+  const [maxHands, setMaxHands] = useState(8);
+  const [handNo, setHandNo] = useState(0);
+  const [matchActive, setMatchActive] = useState(false);
+  const [handRunning, setHandRunning] = useState(false);
+  const [intervalMs, setIntervalMs] = useState(300);
+  const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
+  const [showHands, setShowHands] = useState(true);
+
+  function appendLogs(lines:string[]){ setLog(prev => { const next=[...prev]; for(const ln of lines){ next.push(ln); } return next; }); }
+
+  function sortTiles(arr:string[]){
+    const order=(t:string)=>{
+      const suitRank = t[1]==='W'?0:(t[1]==='B'?1:(t[1]==='T'?2:3));
+      return suitRank*100 + (parseInt(t[0],10)||0);
+    };
+    return [...arr].sort((a,b)=>order(a)-order(b));
+  }
 
   // 计算可以吃的三张序列（包含目标牌）
   function possibleChiSeqs(hand:string[], taken:string){
@@ -16,245 +46,207 @@ export default function Home(){
     return seqs;
   }
 
-  function tileClass(t:string){ const s=t[1]; if(s==='W') return 'tile w'; if(s==='B') return 'tile b'; if(s==='T') return 'tile t'; return 'tile z'; }
-  function tileLabel(t:string){ const n=t[0]; const s=t[1]; if(s==='Z'){ const map:Record<string,string>={ '1':'東','2':'南','3':'西','4':'北','5':'中','6':'發','7':'白' }; return map[n]||t; } const mark = s==='W'?'万':(s==='B'?'饼':'条'); return `${n}${mark}`; }
-  const Tile = ({t, small=false}:{t:string; small?:boolean})=>(<span className={tileClass(t)+(small?' small':'')} title={t}>{tileLabel(t)}</span>);
-
-  const [players, setPlayers] = useState<PlayerState[]>([]);
-  const [table, setTable] = useState<any|null>(null);
-  const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
-  const [wall, setWall] = useState<string[]>([]);
-  const [log, setLog] = useState<string[]>([]);
-  const [maxHands, setMaxHands] = useState(16);
-  const [handNo, setHandNo] = useState(0);
-  const [matchActive, setMatchActive] = useState(false);
-  const [handRunning, setHandRunning] = useState(false);
-  const [intervalMs, setIntervalMs] = useState(1000);
-  const [intervalInput, setIntervalInput] = useState("1000");
-  const [showHands, setShowHands] = useState(true);
-  const [keys, setKeys] = useState<{kimi?:string; kimi2?:string; gemini?:string; grok?:string}>({});
-
-  function appendLogs(lines: string[]){
-    setLog(prev => {
-      const next=[...prev];
-      for(const ln of lines){
-        if(next.length===0 || next[next.length-1]!==ln) next.push(ln);
-      }
-      return next;
-    });
+  function startNewMatch() {
+    setLog([]);
+    const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
+    const ps = dealHands(w, ['kimi','kimi2','gemini','grok']);
+    setPlayers(ps);
+    setWall(w);
+    setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p, melds: [], isWinner:false })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
+    appendLogs(['新比赛开始（轮次清零，分数重置）']);
+    setHandNo(0);
+    setMatchActive(true);
+    setHandRunning(false);
   }
-
-  function sortTiles(arr: string[]): string[] {
-    const suitOrder: Record<string, number> = { 'W':0, 'B':1, 'T':2, 'Z':3 };
-    type SortKey = [number, number, string];
-    const key = (t: string): SortKey => [suitOrder[t[1]] ?? 9, parseInt(t[0],10) || 0, t];
-    return [...arr].sort((a,b)=>{
-      const ka=key(a), kb=key(b);
-      if(ka[0]!==kb[0]) return ka[0]-kb[0];
-      if(ka[1]!==kb[1]) return ka[1]-kb[1];
-      return ka[2]<kb[2]? -1 : ka[2]>kb[2]? 1 : 0;
-    });
-  }
-
- function startNewMatch() {
-  setLog([]); // ✅ 清空旧日志
-  const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
-  const ps = dealHands(w, ['kimi','kimi2','gemini','grok']);
-  setPlayers(ps);
-  setWall(w);
-  appendLogs(['新比赛开始（轮次清零，分数重置）']);
-  // 初始化用于规则处理的桌面快照（只在后续逐步接入时使用）
-  setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p, melds: [], isWinner:false })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
-  setHandNo(0);
-  setMatchActive(true);
-  setHandRunning(false);
-}
 
   function startNextHand(){
     if(!matchActive){ alert('请先开始新比赛'); return; }
     if(handRunning){ alert('当前一轮仍在进行中'); return; }
     if(handNo>=maxHands){ alert('本场比赛轮次已满，请新开一场比赛'); return; }
     const w = ruleMode==='SCZDXZ' ? generateWall108() : generateWall136();
-    const ps = players.map(p => ({ ...p, hand: w.splice(0,13), discards: [] }));
+    const ps = players.map(p => ({ ...p, hand: w.splice(0,13), discards: [], melds: [], isWinner:false }));
     setPlayers(ps); setWall(w);
+    setTable({ wall: [...w], discards: [], players: ps.map(p=>({ ...p })), turn: 0, dealer:0, lastDiscard:null, roundActive:true, winners: [], rule: ruleMode });
     appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮开始 ——`]);
     setHandRunning(true);
     void playOneHand(ps, w);
   }
 
-  function buildSnapshot(currentIndex: number){
-    // me + opponents + table info
-    const me = players[currentIndex];
-    const opps = players.map((p,idx)=> idx!==currentIndex ? ({ ai:p.ai, discards:p.discards, score:p.score }) : null).filter(Boolean);
-    return {
-      me:{ ai: me.ai, discards: me.discards, score: me.score },
-      opponents: opps,
-      table:{ wallCount: wall.length, handNo, maxHands },
-      discardsAll: players.map(p=>({ ai:p.ai, discards:p.discards }))
-    };
-  }
-  async function playOneHand(ps: PlayerState[], w: string[]){
-    for(let turn=0; turn<256; turn++){
-      const i = turn % ps.length;
-      const t = drawTile(w);
-      if(!t){ appendLogs(['墙牌用尽，流局']); break; }
-      ps[i].hand.push(t);
+  async function playOneHand(ps:PlayerState[], w:string[]){
+    for(let turn=0; turn<2000; turn++){
+      if(!handRunning) break;
+      if(w.length===0){ appendLogs(['牌墙打空，流局']); break; }
+      for(let i=0;i<ps.length;i++){
+        // 跳过已胡
+        // @ts-ignore
+        if(table?.players?.[i]?.isWinner) continue;
 
-      const r = checkWin(ps[i].hand);
-      if(r.win){
-        appendLogs([`${ps[i].ai} 自摸：${r.fan.join('+')} = ${r.score}`]);
-        const base=r.score;
-        ps = ps.map((p,idx)=> idx===i? {...p, score: p.score + base*3 } : {...p, score: p.score - base });
-        setPlayers(ps);
-        break;
-      }
+        // 1) 摸牌
+        const t = w.shift()!;
+        ps[i].hand.push(t);
+        appendLogs([`🀄 ${ps[i].ai} 摸牌 ${tileLabel(t)}`]);
 
-      let out: string | null = null;
-      let reasonText = 'local';
-      let apiMeta: any = null;
-      try{
-        const resp = await fetch(`/api/aiPlay?ai=${ps[i].ai}`, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ hand: ps[i].hand, keys, snapshot: buildSnapshot(i) })
-        }).then(r=>r.json());
-        if(resp?.tile && ps[i].hand.includes(resp.tile)){ out=resp.tile; reasonText = resp?.reason || reasonText; }
-        apiMeta = resp?.meta || null;
-      }catch{}
-      if(!out){ out=ps[i].hand[0]; reasonText='fallback'; }
-      const idx=ps[i].hand.indexOf(out); ps[i].hand.splice(idx,1); ps[i].discards.push(out);
-      const apiLine = apiMeta ?
-        `[API] ${ps[i].ai} ${apiMeta.usedApi ? `使用 ${apiMeta.provider} API` : `未调用外部API（${apiMeta.provider}）`} ${apiMeta.detail ? '- ' + apiMeta.detail : ''}`
-        : `[API] ${ps[i].ai} 未调用外部API（无响应），使用本地策略`;
-      const discardLine = `${ps[i].ai} 打出 ${tileLabel(out)}（理由：${reasonText}）`;
-      appendLogs([apiLine, discardLine]);
-      setPlayers([...ps]);
-      await new Promise(r=>setTimeout(r, intervalMs));
-    
-      // === 吃/碰/杠/胡 裁决与执行（自动） ===
-      if(table){
-        // 同步 table 快照（浅同步）
-        table.players = ps.map(p=>({ ...p }));
-        table.wall = [...w];
-        table.lastDiscard = { tile: out, from: i };
-        table.turn = i;
-        // 询问反应
-        const reacts = getReactionsAfterDiscard(table);
-        const resolved = priorityResolve(reacts);
-        if(resolved && resolved.length>0){
-          // 胡优先（可多家）
-          const huSeats = resolved.filter(r=>r.actions.includes('HU')).map(r=>r.seat);
-          if(huSeats.length>0){
-            for(const s of huSeats){
-              markWinner(table, s);
-              appendLogs([`➡️ ${ps[s].ai} 荣和：吃炮 ${out}`]);
+        // 1.1) 自摸
+        const r = checkWin(ps[i].hand);
+        if(r.win){
+          appendLogs([`${ps[i].ai} 自摸：${r.fan.join('+')} = ${r.score}`]);
+          // 标记赢家并继续血战
+          if(table){ markWinner(table, i); setTable({ ...table });
+
+            // 同步玩家可视状态（手牌/面子/弃牌）
+            for(let si=0; si<table.players.length; si++){
+              if(ps[si]){
+                ps[si].hand = [...(table.players[si]?.hand||[])];
+                ps[si].discards = [...(table.players[si]?.discards||[])];
+                // @ts-ignore
+                ps[si].melds = [...(table.players[si]?.melds||[])];
+              }
             }
+            setPlayers([...ps]);
+}
+setPlayers([...ps]);
+          await new Promise(r=>setTimeout(r, intervalMs));
+          continue;
+        }
+
+        // 1.2) 杠（优先 BUGANG，再看 ANGANG）
+        if(table){
+          const me = table.players[i];
+          // 补杠：已有碰，且摸到同张 t
+          const hasPeng = (me.melds||[]).some((m:any)=>m.type==='PENG' && m.tiles && m.tiles[0]===t);
+          if(hasPeng){
+            applyAddGangAction(table, i, t);
+            appendLogs([`➡️ ${ps[i].ai} 补杠 ${tileLabel(t)}（补摸一张）`]);
+            setTable({ ...table });
+
+            // 同步玩家可视状态（手牌/面子/弃牌）
+            for(let si=0; si<table.players.length; si++){
+              if(ps[si]){
+                ps[si].hand = [...(table.players[si]?.hand||[])];
+                ps[si].discards = [...(table.players[si]?.discards||[])];
+                // @ts-ignore
+                ps[si].melds = [...(table.players[si]?.melds||[])];
+              }
+            }
+            setPlayers([...ps]);
+
+            // 杠后自动补一张到手里已经在后端完成；此处不再自摸判断，继续流程
           }else{
-            // 明杠 > 碰 > 吃
-            const gangSeat = resolved.find(r=>r.actions.includes('GANG'))?.seat;
-            if(typeof gangSeat==='number'){
-              applyMeldAction(table, gangSeat, 'GANG', [out,out,out,out]);
-              appendLogs([`➡️ ${ps[gangSeat].ai} 明杠 ${out}`]);
+            // 暗杠：四张相同
+            const counts:Record<string,number>={}; for(const x of ps[i].hand) counts[x]=(counts[x]||0)+1;
+            const angang = Object.entries(counts).find(([k,v])=>v===4)?.[0];
+            if(angang){
+              applyConcealedGangAction(table, i, angang);
+              appendLogs([`➡️ ${ps[i].ai} 暗杠 ${tileLabel(angang)}（补摸一张）`]);
+              setTable({ ...table });
+
+            // 同步玩家可视状态（手牌/面子/弃牌）
+            for(let si=0; si<table.players.length; si++){
+              if(ps[si]){
+                ps[si].hand = [...(table.players[si]?.hand||[])];
+                ps[si].discards = [...(table.players[si]?.discards||[])];
+                // @ts-ignore
+                ps[si].melds = [...(table.players[si]?.melds||[])];
+              }
+            }
+            setPlayers([...ps]);
+
+            }
+          }
+        }
+
+        // 2) 出牌（简单本地规则：丢第一张）
+        const out = ps[i].hand[0];
+        ps[i].hand.splice(0,1);
+        ps[i].discards.push(out);
+        appendLogs([`${ps[i].ai} 打出 ${tileLabel(out)}`]);
+
+        // 3) 询问反应并执行
+        if(table){
+          table.players = ps.map((p,idx)=>({ ...p, melds: (table.players[idx]?.melds||[]), isWinner: (table.players[idx]?.isWinner||false) }));
+          table.wall = [...w];
+          table.lastDiscard = { tile: out, from: i };
+          table.turn = i;
+          const reacts = getReactionsAfterDiscard(table);
+          const resolved = priorityResolve(reacts);
+          if(resolved && resolved.length>0){
+            const huSeats = resolved.filter(r=>r.actions.includes('HU')).map(r=>r.seat);
+            if(huSeats.length>0){
+              for(const s of huSeats){
+                markWinner(table, s);
+                appendLogs([`➡️ ${ps[s].ai} 荣和（接炮） ${tileLabel(out)}`]);
+              }
             }else{
-              const pengSeat = resolved.find(r=>r.actions.includes('PENG'))?.seat;
-              if(typeof pengSeat==='number'){
-                applyMeldAction(table, pengSeat, 'PENG', [out,out,out]);
-                appendLogs([`➡️ ${ps[pengSeat].ai} 碰 ${out}`]);
+              const gangSeat = resolved.find(r=>r.actions.includes('GANG'))?.seat;
+              if(typeof gangSeat==='number'){
+                applyMeldAction(table, gangSeat, 'GANG', [out,out,out,out]);
+                appendLogs([`➡️ ${ps[gangSeat].ai} 明杠 ${tileLabel(out)}（补摸一张）`]);
               }else{
-                const chiSeat = resolved.find(r=>r.actions.includes('CHI'))?.seat;
-                if(typeof chiSeat==='number'){
-                  const seqs = possibleChiSeqs(ps[chiSeat].hand, out);
-                  const choose = seqs[0]||[]; // 简单选第一种
-                  if(choose.length===3){
-                    applyMeldAction(table, chiSeat, 'CHI', choose);
-                    appendLogs([`➡️ ${ps[chiSeat].ai} 吃 ${choose.join('-')}`]);
+                const pengSeat = resolved.find(r=>r.actions.includes('PENG'))?.seat;
+                if(typeof pengSeat==='number'){
+                  applyMeldAction(table, pengSeat, 'PENG', [out,out,out]);
+                  appendLogs([`➡️ ${ps[pengSeat].ai} 碰 ${tileLabel(out)}`]);
+                }else{
+                  const chiSeat = resolved.find(r=>r.actions.includes('CHI'))?.seat;
+                  if(typeof chiSeat==='number'){
+                    const seqs = possibleChiSeqs(ps[chiSeat].hand, out);
+                    const choose = seqs[0]||[];
+                    if(choose.length===3){
+                      applyMeldAction(table, chiSeat, 'CHI', choose);
+                      appendLogs([`➡️ ${ps[chiSeat].ai} 吃 ${choose.map(tileLabel).join('-')}`]);
+                    }
                   }
                 }
               }
             }
+            setTable({ ...table });
           }
         }
-        setTable({ ...table });
-      }
-}
 
-    setHandNo(x=>{
-      const done=x+1;
-      appendLogs([`—— 第 ${done}/${maxHands} 轮结束 ——`]);
-      setHandRunning(false);
-      if(done>=maxHands){ setMatchActive(false); appendLogs(['本场比赛已完成全部轮次。请点击“开始新比赛”开启下一场。']); }
-      return done;
-    });
-    setWall(w);
+        setPlayers([...ps]);
+        await new Promise(r=>setTimeout(r, intervalMs));
+      }
+    }
+    appendLogs([`—— 第 ${handNo+1}/${maxHands} 轮结束 ——`]);
+    setHandRunning(false);
+    setHandNo(x=>x+1);
   }
 
   return (<div className="max-w">
-    <h1 style={{fontSize:24,fontWeight:700,marginBottom:12}}>Mahjong AI Match v3.3.3d（API审计优先 + 去重日志）</h1>
+    <h1 style={{fontSize:22,fontWeight:700,marginBottom:12}}>Mahjong AI Match — 吃/碰/杠/胡（四川/传统 可切换）</h1>
 
     <div className="card">
       <div className="flex items-center gap-3" style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-        <label className="small">规则：<select value={ruleMode} onChange={e=>setRuleMode(e.target.value as RuleMode)}>
-              <option value='SCZDXZ'>四川·血战到底（108）</option>
-              <option value='BASIC'>传统（136）</option>
-            </select>　最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
-        <label className="small">
-  出牌间隔(ms)：
-  <input
-    className="w-24"
-    type="number"
-    min="100"
-    step="100"
-    value={intervalInput}
-    onChange={e => {
-      const val = e.target.value;
-      setIntervalInput(val);
-      const parsed = parseInt(val, 10);
-      if (!isNaN(parsed) && parsed >= 100) {
-        setIntervalMs(parsed);
-      }
-    }}
-  />
-</label>
-
-        <button className="btn" onClick={startNewMatch}>开始新比赛</button>
-        <button className="btn" onClick={startNextHand} disabled={!matchActive || handRunning || handNo>=maxHands}>开始新一轮</button>
+        <label className="small">规则：
+          <select value={ruleMode} onChange={e=>setRuleMode(e.target.value as RuleMode)}>
+            <option value="SCZDXZ">四川·血战到底（108）</option>
+            <option value="BASIC">传统（136）</option>
+          </select>
+        </label>
+        <label className="small">最大轮次：<input className="w-24" value={maxHands} onChange={e=>setMaxHands(Math.max(1,parseInt(e.target.value||'0',10)||1))} /></label>
+        <label className="small">步进(ms)：<input className="w-24" value={intervalMs} onChange={e=>setIntervalMs(Math.max(0,parseInt(e.target.value||'0',10)||0))} /></label>
         <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
+        <button onClick={startNewMatch}>开始新比赛</button>
+        <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
       </div>
     </div>
 
     <div className="card">
-      <div className="font-semibold mb-2">AI Key 设置（仅本次会话内使用）</div>
-      <div className="grid" style={{gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12}}>
-        <label className="small">Kimi Key 2
-          <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
-        </label>
-        <label className="small">Kimi (Moonshot) Key
-          <input className="w-full" placeholder="moonshot-..." value={keys.kimi||''} onChange={e=>setKeys({...keys, kimi:e.target.value})} />
-        </label>
-        <label className="small">Gemini Key
-          <input className="w-full" placeholder="AIza..." value={keys.gemini||''} onChange={e=>setKeys({...keys, gemini:e.target.value})} />
-        </label>
-        <label className="small">Grok (xAI) Key
-          <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
-        </label>
-      </div>
-      <div className="text-xs" style={{opacity:.7, marginTop:6}}>未填写时，将使用本地启发式出牌（不会请求外部接口）。</div>
-    </div>
-
-    <div className="card">
-      <div className="small">已完成轮次：{handNo} / {maxHands}　墙余：{wall.length}</div>
-      <div className="mt-2">
-        {players.map(p => (<div key={p.ai} className="mb-2">
+      <div className="flex" style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:16}}>
+        {players.map((p, i) => (<div key={p.ai} className="mb-2">
           <div className="font-semibold">{p.ai}　<span className="text-xs" style={{opacity:.8}}>分：{p.score||0}</span></div>
           {showHands && (<>
             <div className="text-xs" style={{opacity:.95, marginTop:4}}>手：</div>
-            <div className="tiles tiles-wrap-14">{sortTiles(p.hand||[]).map((x,i)=>(<Tile key={x+':h:'+i} t={x}/>))}</div>
+            <div className="tiles tiles-wrap-14">{sortTiles(p.hand||[]).map((x,j)=>(<Tile key={x+':h:'+j} t={x}/>))}</div>
           </>)}
+          <div className="text-xs" style={{opacity:.85, marginTop:4}}>面子（吃/碰/杠）：</div>
+          <div className="tiles">{(p.melds||[]).map((m:any,mi:number)=>(<span key={"meld:"+mi} className="meld-group">{(m.tiles||[]).map((x:string,xi:number)=>(<Tile key={x+":m:"+xi} t={x} small/>))}</span>))}</div>
           <div className="text-xs" style={{opacity:.85, marginTop:4}}>弃（顺序）：</div>
-          <div className="tiles">{(p.discards||[]).map((x,i)=>(<Tile key={x+':d:'+i} t={x} small/>))}</div>
+          <div className="tiles">{(p.discards||[]).map((x,j)=>(<Tile key={x+':d:'+j} t={x} small/>))}</div>
         </div>))}
       </div>
     </div>
 
-    <div className="card"><div className="font-semibold mb-2">日志</div><div className="text-sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\n')}</div></div>
+    <div className="card"><div className="font-semibold mb-2">日志</div><div className="log-sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\n')}</div></div>
   </div>);
 }
