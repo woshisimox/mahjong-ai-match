@@ -3,7 +3,6 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 type Decide = { tile: string; reason: string; meta: { usedApi: boolean; provider: string; detail: string } };
 
-// ====== 完整体 shanten + uke-ire 工具 ======
 const ALL_SUITS = ['W','B','T'] as const;
 
 function allTileKeys(includeHonors:boolean){
@@ -21,21 +20,19 @@ function toSuitCounts(hand:string[]){
 function evalSuitFull(cnt:number[]){
   const memo = new Map<string,[number,number]>();
   const clone=(a:number[])=>a.slice();
-  const maxp=(a:[number,number], b:[number,number])=>{
-    if(b[0]>a[0]) return b; if(b[0]===a[0] && b[1]>a[1]) return b; return a;
-  };
+  const maxp=(a:[number,number], b:[number,number])=>{ if(b[0]>a[0]) return b; if(b[0]===a[0] && b[1]>a[1]) return b; return a; };
   function dfs(a:number[], i=1):[number,number]{
     while(i<=9 && a[i]===0) i++;
     if(i>9) return [0,0];
     const key = i+':'+a.join(',');
     const hit = memo.get(key); if(hit) return hit;
     let best:[number,number]=[0,0];
-    { const b=clone(a); b[i]--; best = maxp(best, dfs(b,i)); } // skip one
-    if(a[i]>=3){ const b=clone(a); b[i]-=3; const r=dfs(b,i); best = maxp(best,[r[0]+1,r[1]]); } // pung
-    if(i<=7 && a[i]>0 && a[i+1]>0 && a[i+2]>0){ const b=clone(a); b[i]--; b[i+1]--; b[i+2]--; const r=dfs(b,i); best=maxp(best,[r[0]+1,r[1]]);} // chow
-    if(a[i]>=2){ const b=clone(a); b[i]-=2; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); } // pair as taatsu
-    if(i<=8 && a[i]>0 && a[i+1]>0){ const b=clone(a); b[i]--; b[i+1]--; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); } // ryanmen
-    if(i<=7 && a[i]>0 && a[i+2]>0){ const b=clone(a); b[i]--; b[i+2]--; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); } // kanchan/penchan
+    { const b=clone(a); b[i]--; best = maxp(best, dfs(b,i)); }
+    if(a[i]>=3){ const b=clone(a); b[i]-=3; const r=dfs(b,i); best = maxp(best,[r[0]+1,r[1]]); }
+    if(i<=7 && a[i]>0 && a[i+1]>0 && a[i+2]>0){ const b=clone(a); b[i]--; b[i+1]--; b[i+2]--; const r=dfs(b,i); best=maxp(best,[r[0]+1,r[1]]); }
+    if(a[i]>=2){ const b=clone(a); b[i]-=2; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); }
+    if(i<=8 && a[i]>0 && a[i+1]>0){ const b=clone(a); b[i]--; b[i+1]--; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); }
+    if(i<=7 && a[i]>0 && a[i+2]>0){ const b=clone(a); b[i]--; b[i+2]--; const r=dfs(b,i); best=maxp(best,[r[0], r[1]+1]); }
     memo.set(key, best); return best;
   }
   return dfs(cnt.slice());
@@ -89,7 +86,6 @@ function ukeireOf(hand:string[], snapshot:any, includeHonors:boolean, meldsCount
   return { total, detail, sh0 };
 }
 
-// ====== 本地兜底决策（shanten + uke-ire + 连接度） ======
 function reasonForLocal(x:string, hand:string[], snapshot:any){
   const counts:Record<string,number>={}; for(const t of hand) counts[t]=(counts[t]||0)+1;
   const seen = seenMap(snapshot||{}, hand);
@@ -106,7 +102,7 @@ function reasonForLocal(x:string, hand:string[], snapshot:any){
 }
 function localDecide(hand:string[], snapshot:any): Decide {
   const includeHonors = !!(snapshot?.includeHonors ?? true);
-  const meldsCount = 0; // 服务器侧不强求玩家索引，统一按0估计
+  const meldsCount = 0;
   const keepScore=(x:string)=>{
     const s=x[1], n=+x[0]; let v=0;
     const has=(t:string)=> hand.includes(t);
@@ -117,9 +113,7 @@ function localDecide(hand:string[], snapshot:any): Decide {
     }
     return v;
   };
-
-  let drop = hand[0];
-  let bestSh = 999, bestUke = -1, bestKeep = 1e9;
+  let drop = hand[0]; let bestSh = 999, bestUke = -1, bestKeep = 1e9;
   for(const x of hand){
     const h2 = hand.slice(); const idx=h2.indexOf(x); if(idx>=0) h2.splice(idx,1);
     const sh = bestShanten(h2, meldsCount, includeHonors);
@@ -132,117 +126,55 @@ function localDecide(hand:string[], snapshot:any): Decide {
   return { tile: drop, reason: reasonForLocal(drop, hand, snapshot)+`；shanten=${bestSh}，uke=${bestUke}`, meta:{ usedApi:false, provider:'local', detail:'shanten+ukeire' } };
 }
 
-// ====== 外部模型（有 key 则尝试，无则回退 local） ======
 async function callProvider(provider:string, hand:string[], keys:any, snapshot:any): Promise<Decide|null>{
   const text = [
     `你在打麻将（四川/传统皆可），手牌如下：${hand.join(',')}`,
     `请只返回 JSON：{"tile":"<要打出的牌>","reason":"<简短理由>"}`,
     `注意：tile 必须是以上手牌中的一个编码（例如 "5W"）`,
-  ].join('\n');
-
-  // 通用解析
-  const parse = (s:string): {tile?:string;reason?:string}=>{
-    try{
-      const m = s.match(/\{[\s\S]*\}/);
-      const obj = m ? JSON.parse(m[0]) : JSON.parse(s);
-      return { tile: obj.tile, reason: obj.reason };
-    }catch{ return {}; }
-  };
-
+  ].join('\\n');
+  const parse = (s:string): {tile?:string;reason?:string}=>{ try{ const m=s.match(/\{[\s\S]*\}/); const obj=m?JSON.parse(m[0]):JSON.parse(s); return { tile: obj.tile, reason: obj.reason }; }catch{ return {}; } };
   try{
     if(provider==='kimi2' || provider==='kimi'){
-      const apiKey = keys?.kimi2 || keys?.kimi;
-      if(!apiKey) return null;
-      const resp = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'moonshot-v1-8k',
-          messages: [{ role:'user', content: text }],
-          temperature: 0.2
-        })
+      const apiKey = keys?.kimi2 || keys?.kimi; if(!apiKey) return null;
+      const resp = await fetch('https://api.moonshot.cn/v1/chat/completions',{
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},
+        body: JSON.stringify({ model:'moonshot-v1-8k', messages:[{role:'user', content:text}], temperature:0.2 })
       });
-      if(!resp.ok) return null;
-      const data = await resp.json();
-      const content = data?.choices?.[0]?.message?.content || '';
-      const obj = parse(content);
-      if(obj.tile && hand.includes(obj.tile)){
-        return { tile: obj.tile, reason: obj.reason || 'kimi', meta:{ usedApi:true, provider:'kimi2', detail:'chat' } };
-      }
+      if(!resp.ok) return null; const data=await resp.json();
+      const content = data?.choices?.[0]?.message?.content || ''; const obj=parse(content);
+      if(obj.tile && hand.includes(obj.tile)) return { tile: obj.tile, reason: obj.reason || 'kimi', meta:{ usedApi:true, provider:'kimi2', detail:'chat' } };
       return null;
     }
-
     if(provider==='gemini'){
-      const apiKey = keys?.gemini;
-      if(!apiKey) return null;
+      const apiKey = keys?.gemini; if(!apiKey) return null;
       const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${apiKey}`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text }] }],
-          generationConfig: { temperature: 0.2 }
-        })
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contents:[{ parts:[{ text }] }], generationConfig:{ temperature:0.2 } })
       });
-      if(!resp.ok) return null;
-      const data = await resp.json();
-      const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const obj = parse(content);
-      if(obj.tile && hand.includes(obj.tile)){
-        return { tile: obj.tile, reason: obj.reason || 'gemini', meta:{ usedApi:true, provider:'gemini', detail:'generateContent' } };
-      }
+      if(!resp.ok) return null; const data=await resp.json();
+      const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''; const obj=parse(content);
+      if(obj.tile && hand.includes(obj.tile)) return { tile: obj.tile, reason: obj.reason || 'gemini', meta:{ usedApi:true, provider:'gemini', detail:'generateContent' } };
       return null;
     }
-
     if(provider==='grok'){
-      const apiKey = keys?.grok;
-      if(!apiKey) return null;
+      const apiKey = keys?.grok; if(!apiKey) return null;
       const resp = await fetch('https://api.x.ai/v1/chat/completions', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'grok-2-latest',
-          messages: [{ role:'user', content: text }],
-          temperature: 0.2
-        })
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},
+        body: JSON.stringify({ model:'grok-2-latest', messages:[{role:'user', content:text}], temperature:0.2 })
       });
-      if(!resp.ok) return null;
-      const data = await resp.json();
-      const content = data?.choices?.[0]?.message?.content || '';
-      const obj = parse(content);
-      if(obj.tile && hand.includes(obj.tile)){
-        return { tile: obj.tile, reason: obj.reason || 'grok', meta:{ usedApi:true, provider:'grok', detail:'chat' } };
-      }
+      if(!resp.ok) return null; const data=await resp.json();
+      const content = data?.choices?.[0]?.message?.content || ''; const obj=parse(content);
+      if(obj.tile && hand.includes(obj.tile)) return { tile: obj.tile, reason: obj.reason || 'grok', meta:{ usedApi:true, provider:'grok', detail:'chat' } };
       return null;
     }
-  }catch(_e){
-    // 网络/解析异常统一回退
-    return null;
-  }
-
+  }catch(_e){ return null; }
   return null;
 }
 
-// ====== API 入口 ======
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // 兼容 GET / POST
   const provider = String((req.query.provider || req.query.ai || 'local'));
   const { hand = [], keys = {}, snapshot = {} } = (req.method==='POST' ? (req.body||{}) : {}) as any;
-
-  if(!Array.isArray(hand) || hand.length===0){
-    res.status(200).json({ tile:'', reason:'empty hand', meta:{ usedApi:false, provider:'local', detail:'invalid-hand' } });
-    return;
-  }
-
-  // 先尝试外部模型（如果选择了非 local）
-  if(provider && provider!=='local'){
-    const remote = await callProvider(provider, hand, keys, snapshot);
-    if(remote && remote.tile && hand.includes(remote.tile)){
-      res.status(200).json(remote);
-      return;
-    }
-  }
-
-  // 回退本地
-  const local = localDecide(hand, snapshot);
-  res.status(200).json(local);
+  if(!Array.isArray(hand) || hand.length===0){ res.status(200).json({ tile:'', reason:'empty hand', meta:{ usedApi:false, provider:'local', detail:'invalid-hand' } }); return; }
+  if(provider && provider!=='local'){ const remote = await callProvider(provider, hand, keys, snapshot); if(remote && remote.tile && hand.includes(remote.tile)){ res.status(200).json(remote); return; } }
+  const local = localDecide(hand, snapshot); res.status(200).json(local);
 }
