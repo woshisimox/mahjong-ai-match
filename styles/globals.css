@@ -1,0 +1,29 @@
+:root{
+  --bg:#ecf8f1;
+  --bg-dark:#0b4628;
+  --text:#101010;
+  --text-dark:#f2f6f3;
+  --card:#ffffff;
+  --card-dark:#0f5a34;
+  --accent:#0ea265;
+}
+*{ box-sizing:border-box; }
+html,body{ padding:0; margin:0; font-family: ui-sans-serif,system-ui,Segoe UI,Roboto; }
+body.light{ background: var(--bg); color: var(--text); }
+body.dark{ background: var(--bg-dark); color: var(--text-dark); }
+.container{ max-width: 1080px; margin: 24px auto; padding: 16px; }
+.card{ background: var(--card); color: var(--text); border-radius: 14px; padding: 14px; box-shadow: 0 6px 18px rgba(0,0,0,.07); margin-bottom: 14px; }
+body.dark .card{ background: var(--card-dark); color: var(--text-dark); box-shadow: none; border: 1px solid rgba(255,255,255,.06); }
+.row{ display:flex; align-items:center; gap:12px; flex-wrap: wrap; }
+.spacer{ flex:1; }
+.badge{ background: #e8eef6; color:#243b53; padding:2px 8px; border-radius:999px; font-size:12px; }
+.btn{ padding:8px 12px; border-radius:10px; border:1px solid rgba(0,0,0,.08); background:white; cursor:pointer; }
+body.dark .btn{ background:#147a4b; border-color: rgba(255,255,255,.12); color: var(--text-dark); }
+label.small{ font-size:14px; display:flex; align-items:center; gap:6px; }
+input,select{ padding:6px 8px; border-radius:8px; border:1px solid rgba(0,0,0,.15); background:white; color:#111; }
+body.dark input, body.dark select{ background:#0d5130; color:#f3fff7; border-color: rgba(255,255,255,.18); }
+.tiles{ display:flex; gap:6px; flex-wrap: wrap; }
+.tile{ padding:6px 8px; border-radius:8px; border:1px solid rgba(0,0,0,.08); background:white; }
+body.dark .tile{ background:#116a3f; border-color: rgba(255,255,255,.12); }
+pre{ white-space:pre-wrap; margin:0; }
+.hr{ height:1px; background: rgba(0,0,0,.08); margin:8px 0; }
