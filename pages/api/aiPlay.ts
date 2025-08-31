@@ -26,11 +26,12 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
     const { hand, keys, snapshot } = req.body as { hand: string[]; keys?: Keys; snapshot?: any };
     if(!Array.isArray(hand)||hand.length===0) return res.status(400).json({error:'hand required'});
     
+
 const local=()=>{
   // ---- Improved local heuristic: maximize meld potential, minimize isolation ----
   const counts:Record<string,number>={}; for(const x of hand) counts[x]=(counts[x]||0)+1;
 
-  // Visibility: own hand + everyone discards in snapshot
+  // Visibility: own hand + discards in snapshot
   const seen:Record<string,number>={};
   for(const x of hand) seen[x]=(seen[x]||0)+1;
   const players = Array.isArray(snapshot?.players)? snapshot.players: [];
@@ -99,12 +100,10 @@ const local=()=>{
     return `整体价值较低（连接度${nbh}，已见${seenCnt}）`;
   }
 
-  return { tile: drop, reason: reasonFor(drop) };
+  return { tile: drop, reason: reasonFor(drop), meta:{ usedApi:false, provider:'local', detail:'improved heuristic'} };
 };
- for(const x of hand) counts[x]=(counts[x]||0)+1;
-      function val(x:string){ const n=parseInt(x[0]); const s=x[1]; let v=0; if((counts[x]||0)>=2) v+=2; if(s!=='Z'){ const has=(t:string)=> hand.includes(t); if(has(`${n-1}${s}`)||has(`${n+1}${s}`)) v+=2; if(has(`${n-2}${s}`)||has(`${n+2}${s}`)) v+=1;} return v; }
-      let best=hand[0], sc=1e9; for(const x of hand){ const v=val(x); if(v<sc){ sc=v; best=x; } } return { tile:best, reason:'local', meta:{usedApi:false, provider:'local', detail:'local heuristic'} };
-    };
+
+
     const ks=keys||{};
     if(ai==='kimi2' && ks.kimi2){ const r=await callMoonshot(ks.kimi2, hand, snapshot); return res.json({ ...r, meta:{ usedApi:true, provider:'moonshot', detail:'kimi2 seat'} }); }
     if(ai==='kimi' && ks.kimi){ const r=await callMoonshot(ks.kimi, hand, snapshot); return res.json({ ...r, meta:{ usedApi:true, provider:'moonshot', detail:'kimi seat'} }); }
