@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   generateWall108, generateWall136, dealHands, drawTile, checkWin, type PlayerState,
   type RuleMode, getReactionsAfterDiscard, priorityResolve, applyMeldAction, onDrawPhase,
@@ -22,6 +22,20 @@ export default function Home(){
   const [intervalMs, setIntervalMs] = useState(300);
   const [ruleMode, setRuleMode] = useState<RuleMode>('SCZDXZ');
   const [showHands, setShowHands] = useState(true);
+  type Keys = { kimi?: string; kimi2?: string; gemini?: string; grok?: string };
+  const [keys, setKeys] = useState<Keys>({});
+
+  // load/save keys in sessionStorage
+  useEffect(()=>{
+    try{
+      const s = sessionStorage.getItem('mahjong_api_keys');
+      if(s){ setKeys(JSON.parse(s)); }
+    }catch{}
+  }, []);
+  useEffect(()=>{
+    try{ sessionStorage.setItem('mahjong_api_keys', JSON.stringify(keys||{})); }catch{}
+  }, [keys]);
+    
 
   function appendLogs(lines:string[]){ setLog(prev => { const next=[...prev]; for(const ln of lines){ next.push(ln); } return next; }); }
 
@@ -72,6 +86,23 @@ export default function Home(){
     void playOneHand(ps, w);
   }
 
+
+  async function askAI(ai:string, hand:string[], snapshot:any){
+    try{
+      const resp = await fetch(`/api/aiPlay?ai=${encodeURIComponent(ai)}`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ hand, keys, snapshot })
+      });
+      const data = await resp.json();
+      if(data && typeof data.tile==='string' && hand.includes(data.tile)){
+        return data;
+      }
+    }catch(e){}
+    // fallback: drop first
+    return { tile: hand[0], reason: 'fallback (no api)', meta:{ usedApi:false, provider:'local' } };
+  }
+    
   async function playOneHand(ps:PlayerState[], w:string[]){
     for(let turn=0; turn<2000; turn++){
       if(!handRunning) break;
@@ -155,11 +186,17 @@ setPlayers([...ps]);
           }
         }
 
-        // 2) 出牌（简单本地规则：丢第一张）
-        const out = ps[i].hand[0];
-        ps[i].hand.splice(0,1);
+        // 2) 出牌（调用 /api/aiPlay 决策 + 本地兜底）
+        const snapshot:any = table ? { players: table.players, discards: table.discards } : {};
+        const decide = await askAI(ps[i].ai, [...ps[i].hand], snapshot);
+        const out = (decide && decide.tile && ps[i].hand.includes(decide.tile)) ? decide.tile : ps[i].hand[0];
+        const reasonText = decide?.reason || 'local';
+        // 执行弃牌
+        const idxTile = ps[i].hand.indexOf(out);
+        ps[i].hand.splice(idxTile,1);
         ps[i].discards.push(out);
-        appendLogs([`${ps[i].ai} 打出 ${tileLabel(out)}`]);
+        appendLogs([`[API] ${ps[i].ai} ${decide?.meta?.usedApi? '使用' : '未使用'}（${decide?.meta?.provider||'local'}）`, `${ps[i].ai} 打出 ${tileLabel(out)}（理由：${reasonText}）`]);
+         ${tileLabel(out)}`]);
 
         // 3) 询问反应并执行
         if(table){
@@ -228,7 +265,26 @@ setPlayers([...ps]);
         <label className="small"><input type="checkbox" checked={showHands} onChange={e=>setShowHands(e.target.checked)} /> 显示手牌</label>
         <button onClick={startNewMatch}>开始新比赛</button>
         <button onClick={startNextHand} disabled={!matchActive}>开始下一轮</button>
-      </div>
+      
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
+          <div>
+            <div className="small mb-1">Kimi（Moonshot）API Key</div>
+            <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
+          </div>
+          <div>
+            <div className="small mb-1">Kimi（Moonshot 备用）</div>
+            <input className="w-full" placeholder="moonshot-..." value={keys.kimi||''} onChange={e=>setKeys({...keys, kimi:e.target.value})} />
+          </div>
+          <div>
+            <div className="small mb-1">Gemini API Key</div>
+            <input className="w-full" placeholder="AIza..." value={keys.gemini||''} onChange={e=>setKeys({...keys, gemini:e.target.value})} />
+          </div>
+          <div>
+            <div className="small mb-1">Grok API Key</div>
+            <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
+          </div>
+        </div>
+    
     </div>
 
     <div className="card">
@@ -244,7 +300,26 @@ setPlayers([...ps]);
           <div className="text-xs" style={{opacity:.85, marginTop:4}}>弃（顺序）：</div>
           <div className="tiles">{(p.discards||[]).map((x,j)=>(<Tile key={x+':d:'+j} t={x} small/>))}</div>
         </div>))}
-      </div>
+      
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0,1fr))', gap:12, width:'100%', marginTop:8}}>
+          <div>
+            <div className="small mb-1">Kimi（Moonshot）API Key</div>
+            <input className="w-full" placeholder="moonshot-..." value={keys.kimi2||''} onChange={e=>setKeys({...keys, kimi2:e.target.value})} />
+          </div>
+          <div>
+            <div className="small mb-1">Kimi（Moonshot 备用）</div>
+            <input className="w-full" placeholder="moonshot-..." value={keys.kimi||''} onChange={e=>setKeys({...keys, kimi:e.target.value})} />
+          </div>
+          <div>
+            <div className="small mb-1">Gemini API Key</div>
+            <input className="w-full" placeholder="AIza..." value={keys.gemini||''} onChange={e=>setKeys({...keys, gemini:e.target.value})} />
+          </div>
+          <div>
+            <div className="small mb-1">Grok API Key</div>
+            <input className="w-full" placeholder="xai-..." value={keys.grok||''} onChange={e=>setKeys({...keys, grok:e.target.value})} />
+          </div>
+        </div>
+    
     </div>
 
     <div className="card"><div className="font-semibold mb-2">日志</div><div className="log-sm" style={{whiteSpace:'pre-wrap'}}>{log.join('\n')}</div></div>
