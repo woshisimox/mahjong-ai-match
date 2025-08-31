@@ -196,8 +196,6 @@ setPlayers([...ps]);
         ps[i].hand.splice(idxTile,1);
         ps[i].discards.push(out);
         appendLogs([`[API] ${ps[i].ai} ${decide?.meta?.usedApi? '使用' : '未使用'}（${decide?.meta?.provider||'local'}）`, `${ps[i].ai} 打出 ${tileLabel(out)}（理由：${reasonText}）`]);
-         ${tileLabel(out)}`]);
-
         // 3) 询问反应并执行
         if(table){
           table.players = ps.map((p,idx)=>({ ...p, melds: (table.players[idx]?.melds||[]), isWinner: (table.players[idx]?.isWinner||false) }));
